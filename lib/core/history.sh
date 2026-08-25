@@ -51,12 +51,24 @@ HISTORY_ACTIVE_OTHER=0
 HISTORY_ACTIVE_OPERATIONS=0
 HISTORY_ACTIVE_FAILED_TASKS=0
 
+# Resolve mole's state dir even when platform.sh was not sourced yet
+# (bin/history.sh sources this file directly).
+_mole_history_state_dir() {
+    if command -v mole_state_dir > /dev/null 2>&1; then
+        mole_state_dir
+    elif [[ "$(uname -s)" == "Linux" ]]; then
+        printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/mole"
+    else
+        printf '%s\n' "$HOME/Library/Logs/mole"
+    fi
+}
+
 history_operations_log_file() {
-    printf '%s\n' "${MOLE_OPERATIONS_LOG:-${OPERATIONS_LOG_FILE:-$HOME/Library/Logs/mole/operations.log}}"
+    printf '%s\n' "${MOLE_OPERATIONS_LOG:-${OPERATIONS_LOG_FILE:-$(_mole_history_state_dir)/operations.log}}"
 }
 
 history_deletions_log_file() {
-    printf '%s\n' "${MOLE_DELETE_LOG:-$HOME/Library/Logs/mole/deletions.log}"
+    printf '%s\n' "${MOLE_DELETE_LOG:-$(_mole_history_state_dir)/deletions.log}"
 }
 
 history_normalize_limit() {
