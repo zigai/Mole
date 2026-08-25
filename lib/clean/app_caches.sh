@@ -384,8 +384,17 @@ clean_editor_obsolete_extensions() {
             target="$ext_root/$key"
             [[ -d "$target" ]] || continue
             safe_clean "$target" "Obsolete $editor_label extension"
-        done < <(plutil -p "$obsolete_file" 2> /dev/null |
-            sed -nE 's/^[[:space:]]*"([^"]+)"[[:space:]]*=>.*/\1/p')
+        done < <(
+            if command -v plutil > /dev/null 2>&1; then
+                plutil -p "$obsolete_file" 2> /dev/null |
+                    sed -nE 's/^[[:space:]]*"([^"]+)"[[:space:]]*=>.*/\1/p'
+            else
+                # .obsolete is plain JSON on every platform; extract keys
+                # portably where plutil is absent.
+                grep -oE '"[^"]+"[[:space:]]*:' "$obsolete_file" 2> /dev/null |
+                    sed -E 's/^"(.*)"[[:space:]]*:\s*$/\1/'
+            fi
+        )
     done
 }
 # Code editors.
@@ -1371,7 +1380,7 @@ clean_media_players() {
     # when it has real content (>1 KB). Encrypted track blobs (*.file) are reliable.
     local bnk_file="$spotify_data/PersistentCache/Storage/offline.bnk"
     local bnk_size=0
-    [[ -f "$bnk_file" ]] && bnk_size=$(stat -f%z "$bnk_file" 2> /dev/null || echo 0)
+    [[ -f "$bnk_file" ]] && bnk_size=$(stat "${_MOLE_STAT_SIZE_FLAG}" "$bnk_file" 2> /dev/null || echo 0)
     if [[ $bnk_size -gt 1024 ]] ||
         [[ -d "$spotify_data/PersistentCache/Storage" && -n "$(find "$spotify_data/PersistentCache/Storage" -type f -name "*.file" 2> /dev/null | head -1)" ]]; then
         has_offline_music=true

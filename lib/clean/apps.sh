@@ -556,7 +556,7 @@ is_claude_vm_bundle_orphaned() {
 orphan_cleanup_candidate_identity() {
     local path="$1"
     run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
-        "$STAT_BSD" -f%d:%i:%m "$path" < /dev/null 2> /dev/null
+        "$STAT_BSD" "${_MOLE_STAT_ID_MTIME_FLAG}" "$path" < /dev/null 2> /dev/null
 }
 
 # Capture one coherent deletion capability for a candidate. The mtime check
@@ -1261,7 +1261,7 @@ clean_orphaned_system_services() {
             "$service_cleanup_deadline") || identity_rc=$?
         if [[ $identity_rc -eq 0 ]]; then
             identity=$(_mole_bounded_sudo "$identity_timeout" \
-                -n "$STAT_BSD" -f%d:%i:%m "$candidate" < /dev/null 2> /dev/null) || identity_rc=$?
+                -n "$STAT_BSD" "${_MOLE_STAT_ID_MTIME_FLAG}" "$candidate" < /dev/null 2> /dev/null) || identity_rc=$?
         fi
         if [[ $identity_rc -ne 0 ]]; then
             return "$identity_rc"

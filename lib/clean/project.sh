@@ -138,7 +138,7 @@ EOF
     if [[ ${#paths[@]} -gt 0 ]]; then
         for path in "${paths[@]}"; do
             # Convert $HOME to ~ for portability
-            path="${path/#$HOME/~}"
+            path="${path/#"$HOME"/\~}"
             if ! printf '%s\n' "$path" >> "$tmp_file"; then
                 rm -f "$tmp_file" 2> /dev/null || true
                 return 1
@@ -157,7 +157,7 @@ EOF
 warn_purge_config_write_failure() {
     [[ -t 1 ]] || return 0
     [[ -z "${_PURGE_DISCOVERY_SILENT:-}" ]] || return 0
-    echo -e "${YELLOW}${ICON_WARNING}${NC} Could not save purge paths to ${PURGE_CONFIG_FILE/#$HOME/~}, using discovered paths for this run" >&2
+    echo -e "${YELLOW}${ICON_WARNING}${NC} Could not save purge paths to ${PURGE_CONFIG_FILE/#"$HOME"/\~}, using discovered paths for this run" >&2
 }
 
 # Save discovered paths to config.
@@ -221,7 +221,10 @@ load_purge_config
 
 format_purge_target_path() {
     local path="$1"
-    echo "${path/#$HOME/~}"
+    # Quote the home prefix and escape the replacement tilde: on bash >= 5
+    # an unquoted ~ in the replacement is tilde-expanded back to $HOME,
+    # turning the collapse into a no-op.
+    echo "${path/#"$HOME"/\~}"
 }
 
 compact_purge_menu_path() {
@@ -1507,7 +1510,7 @@ clean_project_artifacts() {
         echo ""
         echo -e "${YELLOW}${ICON_WARNING}${NC} Skipped ${failed_scan_count} project scan ${root_text} because scanning did not complete:"
         for ((scan_index = 0; scan_index < ${#failed_scan_roots[@]}; scan_index++)); do
-            local display_root="${failed_scan_roots[$scan_index]/#$HOME/~}"
+            local display_root="${failed_scan_roots[$scan_index]/#"$HOME"/\~}"
             echo -e "  ${GRAY}${display_root}${NC} (status ${failed_scan_statuses[$scan_index]:-1})"
         done
         echo -e "${GRAY}Re-run with 'mo purge --debug' to inspect the scan failure.${NC}"
@@ -1785,12 +1788,12 @@ clean_project_artifacts() {
         _cached_basenames[_pre_idx]="${artifact_path##*/}"
         if project_root=$(find_purge_project_root_for_artifact "$artifact_path"); then
             _cached_project_names[_pre_idx]="${project_root##*/}"
-            _cached_project_paths[_pre_idx]="${project_root/#$HOME/~}"
+            _cached_project_paths[_pre_idx]="${project_root/#"$HOME"/\~}"
             _cached_project_identities[_pre_idx]=$(mole_path_identity "$project_root")
         else
             project_root="${artifact_path%/*}"
             _cached_project_names[_pre_idx]="${project_root##*/}"
-            _cached_project_paths[_pre_idx]="${project_root/#$HOME/~}"
+            _cached_project_paths[_pre_idx]="${project_root/#"$HOME"/\~}"
             _cached_project_identities[_pre_idx]=$(mole_path_identity "$project_root")
         fi
     done

@@ -14,8 +14,9 @@ if [[ -d "$HOME" ]]; then
 fi
 readonly MOLE_PURGE_PHYSICAL_HOME
 
-# Canonical purge targets (heavy project build artifacts).
-readonly MOLE_PURGE_TARGETS=(
+# Canonical purge targets (heavy project build artifacts). macOS-specific
+# entries join only on darwin so Linux purge discovery never matches them.
+MOLE_PURGE_TARGETS=(
     "node_modules"
     "target"            # Rust, Maven
     "build"             # Gradle, various
@@ -45,14 +46,21 @@ readonly MOLE_PURGE_TARGETS=(
     ".svelte-kit"       # SvelteKit
     ".astro"            # Astro
     "coverage"          # Code coverage reports
-    "DerivedData"       # Xcode
-    "Pods"              # CocoaPods
     ".cxx"              # React Native Android NDK build cache
     ".expo"             # Expo
     ".build"            # Swift Package Manager
 )
+if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
+    MOLE_PURGE_TARGETS+=(
+        "DerivedData"   # Xcode
+        "Pods"          # CocoaPods
+    )
+fi
+readonly MOLE_PURGE_TARGETS
 
-readonly MOLE_PURGE_DEFAULT_SEARCH_PATHS=(
+# macOS cloud-provider roots join only on darwin; the directory does not
+# exist as a sync container on Linux.
+MOLE_PURGE_DEFAULT_SEARCH_PATHS=(
     "$HOME/www"
     "$HOME/dev"
     "$HOME/Projects"
@@ -61,7 +69,6 @@ readonly MOLE_PURGE_DEFAULT_SEARCH_PATHS=(
     "$HOME/Workspace"
     "$HOME/Repos"
     "$HOME/Development"
-    "$HOME/Library/CloudStorage"
     # AI agent worktree containers. These sit under dot directories, which
     # discover_project_dirs cannot reach: it globs "$HOME"/*/ and
     # is_project_container rejects any basename starting with a dot. Listing
@@ -71,6 +78,10 @@ readonly MOLE_PURGE_DEFAULT_SEARCH_PATHS=(
     "$HOME/.codex/worktrees"
     "$HOME/.claude/worktrees"
 )
+if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
+    MOLE_PURGE_DEFAULT_SEARCH_PATHS+=("$HOME/Library/CloudStorage")
+fi
+readonly MOLE_PURGE_DEFAULT_SEARCH_PATHS
 
 readonly MOLE_PURGE_MONOREPO_INDICATORS=(
     "lerna.json"
@@ -114,6 +125,10 @@ readonly MOLE_PURGE_QUICK_HINT_EXCLUDED_TARGETS=(
 mole_purge_is_cloud_synced_path() {
     local path="${1:-}"
     [[ -n "$path" ]] || return 1
+
+    # CloudStorage / Mobile Documents are macOS sync containers only.
+    [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]] || return 1
+
 
     case "$path" in
         "$HOME/Library/CloudStorage" | "$HOME/Library/CloudStorage/"* | "$HOME/Library/Mobile Documents" | "$HOME/Library/Mobile Documents/"* | \

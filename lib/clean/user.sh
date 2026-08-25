@@ -424,7 +424,7 @@ _clean_chromium_old_versions() {
         local newest_version=""
         local newest_mtime=0
         local current_mtime
-        current_mtime=$(stat -f%m "$versions_dir/$current_version" 2> /dev/null || echo "0")
+        current_mtime=$(stat "${_MOLE_STAT_MTIME_FLAG}" "$versions_dir/$current_version" 2> /dev/null || echo "0")
         [[ "$current_mtime" =~ ^[0-9]+$ ]] || current_mtime=0
 
         local -a old_versions=()
@@ -434,7 +434,7 @@ _clean_chromium_old_versions() {
             name=$(basename "$dir")
             [[ "$name" == "Current" ]] && continue
             local mtime
-            mtime=$(stat -f%m "$dir" 2> /dev/null || echo "0")
+            mtime=$(stat "${_MOLE_STAT_MTIME_FLAG}" "$dir" 2> /dev/null || echo "0")
             if [[ "$mtime" =~ ^[0-9]+$ ]] && [[ "$mtime" -gt "$newest_mtime" ]]; then
                 newest_mtime="$mtime"
                 newest_version="$name"
@@ -1978,7 +1978,7 @@ app_support_item_size_bytes() {
 
     if [[ -f "$item" && ! -L "$item" ]]; then
         local file_bytes
-        file_bytes=$(stat -f%z "$item" 2> /dev/null || echo "0")
+        file_bytes=$(stat "${_MOLE_STAT_SIZE_FLAG}" "$item" 2> /dev/null || echo "0")
         [[ "$file_bytes" =~ ^[0-9]+$ ]] || return 1
         printf '%s\n' "$file_bytes"
         return 0
@@ -2487,11 +2487,15 @@ check_large_file_candidates() {
         local path="$1"
         local mtimes="" newest=""
         mtimes=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" \
-            command find "$path" -mindepth 1 -maxdepth 1 -exec stat -f '%m' {} + 2> /dev/null) || return 1
+            command find "$path" -mindepth 1 -maxdepth 1 -exec stat "${_MOLE_STAT_MTIME_FLAG}" {} + 2> /dev/null) || return 1
         [[ -n "$mtimes" ]] || return 1
         newest=$(printf '%s\n' "$mtimes" | sort -n | tail -1)
         [[ "$newest" =~ ^[0-9]+$ ]] || return 1
-        date -r "$newest" '+%Y-%m-%d' 2> /dev/null || return 1
+        if [[ "${MOLE_PLATFORM:-}" == "darwin" ]]; then
+            date -r "$newest" '+%Y-%m-%d' 2> /dev/null || return 1
+        else
+            date -d "@$newest" '+%Y-%m-%d' 2> /dev/null || return 1
+        fi
     }
 
     # One row per large item: "label · size · path", with an optional date

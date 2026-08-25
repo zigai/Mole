@@ -573,8 +573,8 @@ guarded_dev_cache_root_physical_path() {
 
     invoking_uid=$(get_invoking_uid 2> /dev/null) || return 1
     [[ "$invoking_uid" =~ ^[0-9]+$ ]] || return 1
-    container_uid=$($STAT_BSD -f%u "$physical_container" 2> /dev/null) || return 1
-    root_uid=$($STAT_BSD -f%u "$physical_root" 2> /dev/null) || return 1
+    container_uid=$($STAT_BSD "${_MOLE_STAT_UID_FLAG}" "$physical_container" 2> /dev/null) || return 1
+    root_uid=$($STAT_BSD "${_MOLE_STAT_UID_FLAG}" "$physical_root" 2> /dev/null) || return 1
     [[ "$container_uid" == "$invoking_uid" && "$root_uid" == "$invoking_uid" ]] || return 1
     should_protect_path "$cache_root" && return 1
     should_protect_path "$physical_root" && return 1
@@ -836,7 +836,7 @@ go_cache_root_physical_path() {
     local invoking_uid=""
     local root_uid=""
     invoking_uid=$(get_invoking_uid 2> /dev/null) || return 1
-    root_uid=$($STAT_BSD -f%u "$physical_root" 2> /dev/null) || return 1
+    root_uid=$($STAT_BSD "${_MOLE_STAT_UID_FLAG}" "$physical_root" 2> /dev/null) || return 1
     [[ "$invoking_uid" =~ ^[0-9]+$ && "$root_uid" == "$invoking_uid" ]] || return 1
 
     printf '%s\n' "$physical_root"
@@ -1361,7 +1361,7 @@ clean_xcode_documentation_cache() {
     local -a index_mtimes=()
     local entry mtime
     for entry in "${index_entries[@]}"; do
-        mtime=$(stat -f%m "$entry" 2> /dev/null || echo "0")
+        mtime=$(stat "${_MOLE_STAT_MTIME_FLAG}" "$entry" 2> /dev/null || echo "0")
         [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
         index_mtimes+=("$mtime")
     done
@@ -2020,7 +2020,7 @@ clean_xcode_device_support() {
         local -a preflight_mtimes=()
         local preflight_mtime=""
         for candidate in "${preflight_dirs[@]}"; do
-            if ! preflight_mtime=$(stat -f%m "$candidate" 2> /dev/null) || [[ ! "$preflight_mtime" =~ ^[0-9]+$ ]]; then
+            if ! preflight_mtime=$(stat "${_MOLE_STAT_MTIME_FLAG}" "$candidate" 2> /dev/null) || [[ ! "$preflight_mtime" =~ ^[0-9]+$ ]]; then
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (metadata unavailable)"
                 note_activity
                 return 0
@@ -2097,7 +2097,7 @@ clean_xcode_device_support() {
         local -a version_mtimes=()
         local mtime=""
         for entry in "${version_dirs[@]}"; do
-            if ! mtime=$(stat -f%m "$entry" 2> /dev/null) || [[ ! "$mtime" =~ ^[0-9]+$ ]]; then
+            if ! mtime=$(stat "${_MOLE_STAT_MTIME_FLAG}" "$entry" 2> /dev/null) || [[ ! "$mtime" =~ ^[0-9]+$ ]]; then
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (metadata unavailable)"
                 note_activity
                 return 0
@@ -3095,7 +3095,7 @@ clean_dev_jetbrains_toolbox() {
             done < <(
                 for version_dir in "${version_dirs[@]}"; do
                     local mtime
-                    mtime=$(stat -f%m "$version_dir" 2> /dev/null || echo "0")
+                    mtime=$(stat "${_MOLE_STAT_MTIME_FLAG}" "$version_dir" 2> /dev/null || echo "0")
                     printf '%s %s\n' "$mtime" "$version_dir"
                 done | sort -rn
             )
@@ -3170,7 +3170,7 @@ _versioned_agent_entry_mtime() {
     local entry="$1"
     local timeout_seconds="$2"
     run_with_timeout "$timeout_seconds" stat \
-        -f%m "$entry" < /dev/null 2> /dev/null
+        "${_MOLE_STAT_MTIME_FLAG}" "$entry" < /dev/null 2> /dev/null
 }
 
 _plan_versioned_agent_cleanup_targets() {
@@ -5109,7 +5109,9 @@ clean_developer_tools() {
     _run_developer_cleanup_step clean_dev_shell || return $?
     _run_developer_cleanup_step clean_dev_frontend || return $?
     _run_developer_cleanup_step clean_project_caches || return $?
-    _run_developer_cleanup_step --strict clean_dev_mobile || return $?
+    if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
+        _run_developer_cleanup_step --strict clean_dev_mobile || return $?
+    fi
     _run_developer_cleanup_step clean_dev_jvm || return $?
     _run_developer_cleanup_step clean_dev_jetbrains_toolbox || return $?
     _run_developer_cleanup_step clean_dev_jetbrains_logs || return $?
@@ -5124,27 +5126,31 @@ clean_developer_tools() {
     _run_developer_cleanup_step clean_dev_ocaml || return $?
 
     # GUI developer applications
-    _run_developer_cleanup_step --strict clean_xcode_tools || return $?
+    if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
+        _run_developer_cleanup_step --strict clean_xcode_tools || return $?
+    fi
     _run_developer_cleanup_step clean_code_editors || return $?
 
     # Homebrew: only blanket-clean downloads/. Wiping api/ (JSON that needs a
     # network re-download) and bootsnap/ (recompiled Ruby) leaves brew silent
     # for ~94s before its first output on the next run.
-    _run_developer_cleanup_step \
-        safe_clean ~/Library/Caches/Homebrew/downloads/* "Homebrew cache" || return $?
-    local brew_lock_dirs=(
-        "/opt/homebrew/var/homebrew/locks"
-        "/usr/local/var/homebrew/locks"
-    )
-    for lock_dir in "${brew_lock_dirs[@]}"; do
-        if [[ -d "$lock_dir" && -w "$lock_dir" ]]; then
-            _run_developer_cleanup_step \
-                safe_clean "$lock_dir"/* "Homebrew lock files" || return $?
-        elif [[ -d "$lock_dir" ]]; then
-            if find "$lock_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
-                debug_log "Skipping read-only Homebrew locks in $lock_dir"
+    if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
+        _run_developer_cleanup_step \
+            safe_clean ~/Library/Caches/Homebrew/downloads/* "Homebrew cache" || return $?
+        local brew_lock_dirs=(
+            "/opt/homebrew/var/homebrew/locks"
+            "/usr/local/var/homebrew/locks"
+        )
+        for lock_dir in "${brew_lock_dirs[@]}"; do
+            if [[ -d "$lock_dir" && -w "$lock_dir" ]]; then
+                _run_developer_cleanup_step \
+                    safe_clean "$lock_dir"/* "Homebrew lock files" || return $?
+            elif [[ -d "$lock_dir" ]]; then
+                if find "$lock_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
+                    debug_log "Skipping read-only Homebrew locks in $lock_dir"
+                fi
             fi
-        fi
-    done
-    _run_developer_cleanup_step clean_homebrew || return $?
+        done
+        _run_developer_cleanup_step clean_homebrew || return $?
+    fi
 }

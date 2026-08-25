@@ -20,6 +20,8 @@ source "$SCRIPT_DIR/../lib/clean/app_caches.sh"
 source "$SCRIPT_DIR/../lib/clean/hints.sh"
 source "$SCRIPT_DIR/../lib/clean/system.sh"
 source "$SCRIPT_DIR/../lib/clean/user.sh"
+source "$SCRIPT_DIR/../lib/clean/linux_user.sh"
+source "$SCRIPT_DIR/../lib/clean/linux_system.sh"
 
 SYSTEM_CLEAN=false
 DRY_RUN=false
@@ -747,7 +749,11 @@ get_cleanup_path_size_kb() {
     # with a zero/invalid stat we also fall back; a symlink reports 0 directly.
     if [[ -L "$path" || -f "$path" ]] && command -v stat > /dev/null 2>&1; then
         local bytes
-        bytes=$(stat -f%z "$path" 2> /dev/null || echo "0")
+        if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+            bytes=$(stat -c%s "$path" 2> /dev/null || echo "0")
+        else
+            bytes=$(stat "${_MOLE_STAT_SIZE_FLAG}" "$path" 2> /dev/null || echo "0")
+        fi
         if [[ "$bytes" =~ ^[0-9]+$ && "$bytes" -gt 0 ]]; then
             echo $(((bytes + 1023) / 1024))
             return 0
@@ -1012,7 +1018,7 @@ _safe_clean_impl() {
             local bulk_stat_file="$temp_dir/bulk_stat"
             local bulk_stat_rc=0
             run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
-                stat -f%z "${existing_paths[@]}" < /dev/null \
+                stat "${_MOLE_STAT_SIZE_FLAG}" "${existing_paths[@]}" < /dev/null \
                 > "$bulk_stat_file" 2> /dev/null || bulk_stat_rc=$?
             if [[ $bulk_stat_rc -ge 128 ]]; then
                 cleanup_interrupt_rc=$bulk_stat_rc
@@ -1453,7 +1459,11 @@ start_cleanup() {
         return 0
     fi
 
-    echo -e "${PURPLE_BOLD}Clean Your Mac${NC}"
+    if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+        echo -e "${PURPLE_BOLD}Clean Your Linux${NC}"
+    else
+        echo -e "${PURPLE_BOLD}Clean Your Mac${NC}"
+    fi
     echo ""
 
     if [[ "$DRY_RUN" != "true" && -t 0 ]]; then
@@ -1505,6 +1515,40 @@ start_cleanup() {
         echo ""
     fi
 }
+
+# Ordered cleanup sections for Linux. Wired through the same section,
+# spinner, dry-run ledger, and cancellation primitives as the macOS flow.
+run_linux_clean_sections() {
+    # ===== 1. User essentials =====
+    start_section "User essentials"
+    _run_cleanup_step clean_linux_user_cache_sweep || return $?
+    _run_cleanup_step clean_linux_trash || return $?
+    _run_cleanup_step clean_linux_browser_caches || return $?
+    end_section
+
+    # ===== 2. Developer tools =====
+    start_section "Developer tools"
+    _run_cleanup_step clean_developer_tools || return $?
+    end_section
+
+    # ===== 3. AUR helper caches =====
+    start_section "AUR helper caches"
+    _run_cleanup_step clean_linux_aur_caches || return $?
+    end_section
+
+    if [[ "$SYSTEM_CLEAN" == "true" ]]; then
+        # ===== 4. System maintenance (sudo-gated) =====
+        start_section "System maintenance"
+        _run_cleanup_step clean_linux_system_maintenance || return $?
+        end_section
+    fi
+
+    # ===== 5. Orphan packages (report-only) =====
+    start_section "Orphan packages"
+    _run_cleanup_step report_linux_orphan_packages || return $?
+    end_section
+}
+
 
 perform_cleanup() {
     if [[ -n "$EXTERNAL_VOLUME_TARGET" ]]; then
@@ -1617,7 +1661,7 @@ perform_cleanup() {
         fi
     fi
 
-    if [[ -t 1 && "$DRY_RUN" != "true" ]]; then
+    if [[ -t 1 && "$DRY_RUN" != "true" && "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
         local fda_status=0
         has_full_disk_access
         fda_status=$?
@@ -1668,6 +1712,13 @@ perform_cleanup() {
             _run_cleanup_step clean_external_volume_target "$EXTERNAL_VOLUME_TARGET" || return $?
             end_section
         else
+            # Linux has its own ordered section list; the macOS sequence
+            # below stays untouched.
+            if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+                run_linux_clean_sections || return $?
+                return 0
+            fi
+
             # ===== 1. System =====
             if [[ "$SYSTEM_CLEAN" == "true" ]]; then
                 start_section "System"

@@ -87,7 +87,7 @@ show_large_active_powerlog_notice() {
 
     local probe_rc=0
     size_bytes=$(_mole_bounded_sudo "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
-        -n "$STAT_BSD" -f%z "$MOLE_ACTIVE_POWERLOG_DB_PATH" < /dev/null 2> /dev/null) || probe_rc=$?
+        -n "$STAT_BSD" "${_MOLE_STAT_SIZE_FLAG}" "$MOLE_ACTIVE_POWERLOG_DB_PATH" < /dev/null 2> /dev/null) || probe_rc=$?
     if [[ $probe_rc -ge 128 ]]; then
         return "$probe_rc"
     fi
@@ -150,7 +150,7 @@ macos_installer_candidate_identity() {
     identity_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
         "$deadline_seconds") || return $?
     run_with_timeout "$identity_timeout" "$STAT_BSD" \
-        -f%d:%i:%m "$path" < /dev/null 2> /dev/null
+        "${_MOLE_STAT_ID_MTIME_FLAG}" "$path" < /dev/null 2> /dev/null
 }
 
 macos_installer_process_is_idle() {
@@ -862,7 +862,7 @@ clean_deep_system() {
             "$system_cleanup_deadline") || stats_rc=$?
         if [[ $stats_rc -eq 0 ]]; then
             stats_out=$(_mole_bounded_sudo_find "$stats_timeout" \
-                "$mem_reports_dir" -maxdepth 5 -type f -mtime +30 -exec stat -f "%z" {} + 2> /dev/null |
+                "$mem_reports_dir" -maxdepth 5 -type f -mtime +30 -exec stat "${_MOLE_STAT_SIZE_FLAG}" {} + 2> /dev/null |
                 awk '{c++; s+=$1} END {print c+0, s+0}') || stats_rc=$?
         fi
     fi
@@ -921,7 +921,7 @@ time_machine_candidate_identity() {
     local identity_timeout=""
     identity_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
         "$deadline_seconds") || return $?
-    run_with_timeout "$identity_timeout" "$STAT_BSD" -f%d:%i:%m "$path" < /dev/null 2> /dev/null
+    run_with_timeout "$identity_timeout" "$STAT_BSD" "${_MOLE_STAT_ID_MTIME_FLAG}" "$path" < /dev/null 2> /dev/null
 }
 
 # Recheck every destructive predicate immediately before tmutil sees the path.

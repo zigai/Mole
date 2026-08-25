@@ -6,6 +6,8 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/purge_shared.sh"
 # Preflight TCC prompts once to avoid mid-run interruptions.
 check_tcc_permissions() {
+    # macOS-only: TCC permission prompts do not exist on Linux.
+    [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]] || return 0
     [[ -t 1 ]] || return 0
     local permission_flag="$HOME/.cache/mole/permissions_granted"
     [[ -f "$permission_flag" ]] && return 0

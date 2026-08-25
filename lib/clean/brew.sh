@@ -199,6 +199,9 @@ restore_homebrew_active_links() {
 }
 
 clean_homebrew() {
+    # Homebrew cache flows are macOS-only; Linux cleans package caches via
+    # the distro plans in lib/clean/linux_system.sh instead.
+    [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]] || return 0
     command -v brew > /dev/null 2>&1 || return 0
     local cleanup_timeout="${MOLE_TIMEOUT_PKG_CLEANUP_SEC:-20}"
     local autoremove_preview_timeout="${MOLE_TIMEOUT_PKG_LIST_SEC:-10}"
