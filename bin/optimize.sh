@@ -233,12 +233,6 @@ main() {
         echo -e "${YELLOW}${ICON_DRY_RUN} DRY RUN MODE${NC}, No files will be modified\n"
     fi
 
-    if ! command -v bc > /dev/null 2>&1; then
-        echo -e "${YELLOW}${ICON_ERROR}${NC} Missing dependency: bc"
-        echo -e "${GRAY}Install with: ${GREEN}brew install bc${NC}"
-        exit 1
-    fi
-
     if [[ -t 1 ]]; then
         start_inline_spinner "Collecting system info..."
     fi

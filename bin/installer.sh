@@ -1,6 +1,8 @@
 #!/bin/bash
 # Mole - Installer command
-# Find and remove installer files - .dmg, .pkg, .mpkg, .iso, .xip, .zip
+# Find and remove installer files. darwin: .dmg, .pkg, .mpkg, .iso, .xip, .zip
+# linux: *.pkg.tar.zst, *.deb, *.rpm, *.AppImage, *.iso, *.tar.gz, *.tar.xz and
+# zips containing them; /var/cache/pacman/pkg is summarized report-only.
 
 set -euo pipefail
 
@@ -30,20 +32,36 @@ trap 'trap - EXIT; cleanup; exit 130' INT TERM
 
 # Scan configuration
 readonly INSTALLER_SCAN_MAX_DEPTH_DEFAULT=2
-readonly INSTALLER_SCAN_PATHS=(
-    "$HOME/Downloads"
-    "$HOME/Desktop"
-    "$HOME/Documents"
-    "$HOME/Public"
-    "$HOME/Library/Downloads"
-    "/Users/Shared"
-    "/Users/Shared/Downloads"
-    "$HOME/Library/Caches/Homebrew"
-    "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Downloads"
-    "$HOME/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"
-    "$HOME/Library/Application Support/Telegram Desktop"
-    "$HOME/Downloads/Telegram Desktop"
-)
+if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+    readonly INSTALLER_SCAN_PATHS=(
+        "$HOME/Downloads"
+        "$HOME/Desktop"
+    )
+    # Linux hunts distribution and app installer formats plus zips that
+    # contain them. /var/cache/pacman/pkg stays report-only (see
+    # INSTALLER_PACMAN_CACHE_DIR): the cache belongs to the package manager,
+    # so it is summarized instead of being offered for deletion.
+    readonly INSTALLER_FILE_EXTENSIONS=(
+        pkg.tar.zst deb rpm AppImage iso tar.gz tar.xz zip
+    )
+else
+    readonly INSTALLER_SCAN_PATHS=(
+        "$HOME/Downloads"
+        "$HOME/Desktop"
+        "$HOME/Documents"
+        "$HOME/Public"
+        "$HOME/Library/Downloads"
+        "/Users/Shared"
+        "/Users/Shared/Downloads"
+        "$HOME/Library/Caches/Homebrew"
+        "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Downloads"
+        "$HOME/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"
+        "$HOME/Library/Application Support/Telegram Desktop"
+        "$HOME/Downloads/Telegram Desktop"
+    )
+    readonly INSTALLER_FILE_EXTENSIONS=(dmg pkg mpkg iso xip zip)
+fi
+readonly INSTALLER_PACMAN_CACHE_DIR="/var/cache/pacman/pkg"
 readonly MAX_ZIP_ENTRIES=50
 readonly INSTALLER_EXIT_INCOMPLETE=3
 ZIP_LIST_CMD=()
@@ -66,8 +84,11 @@ is_installer_zip() {
 
     if ! "${ZIP_LIST_CMD[@]}" "$zip" 2> /dev/null |
         head -n "$cap" |
-        awk '
-            /\.(app|pkg|dmg|xip)(\/|$)/ { found=1; exit 0 }
+        awk -v platform="${MOLE_PLATFORM:-darwin}" '
+            platform == "linux" &&
+                /\.(pkg\.tar\.zst|deb|rpm|AppImage|iso|tar\.gz|tar\.xz)(\/|$)/ { found=1; exit 0 }
+            platform != "linux" &&
+                /\.(app|pkg|dmg|xip)(\/|$)/ { found=1; exit 0 }
             END { exit found ? 0 : 1 }
         '; then
         return 1
@@ -76,17 +97,33 @@ is_installer_zip() {
     return 0
 }
 
+# Match a file name against the platform installer extensions (zip is handled
+# separately by is_installer_zip).
+_is_installer_file_name() {
+    local name="$1"
+    local ext
+    for ext in "${INSTALLER_FILE_EXTENSIONS[@]}"; do
+        [[ "$ext" == "zip" ]] && continue
+        case "$name" in
+            *."$ext") return 0 ;;
+        esac
+    done
+    return 1
+}
+
 handle_candidate_file() {
     local file="$1"
 
     [[ -L "$file" ]] && return 0 # Skip symlinks explicitly
     case "$file" in
-        *.dmg | *.pkg | *.mpkg | *.iso | *.xip)
-            echo "$file"
-            ;;
         *.zip)
             [[ -r "$file" ]] || return 0
             if is_installer_zip "$file" 2> /dev/null; then
+                echo "$file"
+            fi
+            ;;
+        *)
+            if _is_installer_file_name "$(basename "$file")"; then
                 echo "$file"
             fi
             ;;
@@ -101,7 +138,10 @@ scan_installers_in_path() {
 
     local file
 
-    if command -v fd > /dev/null 2>&1; then
+    # The fd fast path is kept for darwin's flat extensions. On linux the
+    # extension list has compound suffixes (pkg.tar.zst, tar.gz) that fd -e
+    # matches unreliably, so find with explicit -name globs drives it.
+    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]] && command -v fd > /dev/null 2>&1; then
         while IFS= read -r file; do
             handle_candidate_file "$file"
         done < <(
@@ -110,12 +150,17 @@ scan_installers_in_path() {
                 . "$path" 2> /dev/null || true
         )
     else
+        local -a name_args=()
+        local ext
+        for ext in "${INSTALLER_FILE_EXTENSIONS[@]}"; do
+            [[ ${#name_args[@]} -gt 0 ]] && name_args+=(-o)
+            name_args+=(-name "*.$ext")
+        done
         while IFS= read -r file; do
             handle_candidate_file "$file"
         done < <(
             find "$path" -maxdepth "$max_depth" -type f \
-                \( -name '*.dmg' -o -name '*.pkg' -o -name '*.mpkg' \
-                -o -name '*.iso' -o -name '*.xip' -o -name '*.zip' \) \
+                \( "${name_args[@]}" \) \
                 2> /dev/null || true
         )
     fi
@@ -125,6 +170,41 @@ scan_all_installers() {
     for path in "${INSTALLER_SCAN_PATHS[@]}"; do
         scan_installers_in_path "$path"
     done
+}
+
+# /var/cache/pacman/pkg is package-manager property: summarize it read-only
+# instead of offering its contents for deletion. Trim it via `mo optimize`
+# (package cache trim), which previews the paccache plan before running it.
+_installer_report_pacman_cache() {
+    local cache_dir="${1:-$INSTALLER_PACMAN_CACHE_DIR}"
+    [[ -d "$cache_dir" ]] || return 0
+
+    local -a name_args=()
+    local ext
+    for ext in "${INSTALLER_FILE_EXTENSIONS[@]}"; do
+        [[ "$ext" == "zip" ]] && continue
+        [[ ${#name_args[@]} -gt 0 ]] && name_args+=(-o)
+        name_args+=(-name "*.$ext")
+    done
+
+    local count=0 bytes=0 file_size
+    local file
+    while IFS= read -r file; do
+        [[ -n "$file" ]] || continue
+        count=$((count + 1))
+        file_size=$(get_file_size "$file" 2> /dev/null || echo 0)
+        [[ "$file_size" =~ ^[0-9]+$ ]] || file_size=0
+        bytes=$((bytes + file_size))
+    done < <(find "$cache_dir" -maxdepth 1 -type f \
+        \( "${name_args[@]}" \) 2> /dev/null || true)
+
+    if [[ $count -eq 0 ]]; then
+        return 0
+    fi
+    local human
+    human=$(bytes_to_human "$bytes")
+    echo -e "${GRAY}${ICON_INFO}${NC} Report only: $count installer packages in $cache_dir ($human)"
+    echo -e "${GRAY}  Trim with 'mo optimize' (package cache trim) instead${NC}"
 }
 
 # Initialize stats
@@ -237,6 +317,9 @@ collect_installers() {
     if [[ -t 1 ]]; then
         stop_inline_spinner
     fi
+
+    # Linux only: summarize the pacman package cache without offering it.
+    _installer_report_pacman_cache
 
     if [[ ${#all_files[@]} -eq 0 ]]; then
         if [[ "${IN_ALT_SCREEN:-0}" != "1" ]]; then

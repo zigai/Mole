@@ -17,6 +17,39 @@ if [[ -n "${MOLE_MANAGE_UPDATE_LOADED:-}" ]]; then
 fi
 readonly MOLE_MANAGE_UPDATE_LOADED=1
 
+# -----------------------------------------------------------------------------
+# Fork provenance: this is zigai/Mole, a Linux-focused fork of tw93/Mole.
+# Every runtime endpoint below (raw install.sh, GitHub API, git ls-remote)
+# resolves against the fork so self-update can never pull upstream
+# macOS-only code. The upstream remote stays configured for merges only;
+# neither self-update nor self-remove ever contacts tw93 endpoints.
+# -----------------------------------------------------------------------------
+readonly MOLE_UPDATE_REPO_SLUG="zigai/Mole"
+
+# Installer script URL for a given ref (a V-tag like "V1.52.0", or "main").
+update_installer_url() {
+    printf 'https://raw.githubusercontent.com/%s/%s/install.sh\n' \
+        "$MOLE_UPDATE_REPO_SLUG" "${1:-main}"
+}
+
+# One-line hint for Arch-like hosts after a successful script update: point
+# AUR users at the pacman-managed channel instead of re-running the script.
+# Detection honors MOLE_OS_RELEASE_FILE so tests can override /etc/os-release.
+_update_host_is_arch_like() {
+    local os_release="${MOLE_OS_RELEASE_FILE:-/etc/os-release}"
+    [[ -r "$os_release" ]] || return 1
+    local field
+    field="$(sed -n -E 's/^(ID|ID_LIKE)=(.*)$/\2/p' "$os_release" 2> /dev/null | tr '[:upper:]' '[:lower:]')"
+    [[ "$field" == *arch* ]]
+}
+
+_update_print_linux_aur_hint() {
+    [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]] || return 0
+    _update_host_is_arch_like || return 0
+    printf '%s Tip: on Arch and derivatives you can keep mo current via an AUR package instead of the install script.\n' \
+        "${ICON_INFO:-ℹ}"
+}
+
 curl_download_with_retry() {
     local url="$1"
     local output_file="$2"
@@ -95,8 +128,8 @@ _update_lock_path_has_unsafe_ancestor() {
 
     while true; do
         [[ ! -L "$probe" ]] || return 0
-        owner_uid=$(/usr/bin/stat -f%u "$probe" 2> /dev/null || true)
-        mode=$(/usr/bin/stat -f%Lp "$probe" 2> /dev/null || true)
+        owner_uid=$(/usr/bin/stat "${_MOLE_STAT_UID_FLAG}" "$probe" 2> /dev/null || true)
+        mode=$(/usr/bin/stat "${_MOLE_STAT_MODE_FLAG}" "$probe" 2> /dev/null || true)
         [[ "$owner_uid" =~ ^[0-9]+$ && "$mode" =~ ^[0-7]+$ ]] || return 0
         if [[ "$use_sudo" == "true" || ${EUID:-0} -eq 0 ]]; then
             [[ "$owner_uid" -eq 0 ]] || return 0
@@ -108,10 +141,14 @@ _update_lock_path_has_unsafe_ancestor() {
             # group-writable prefixes, but keep world-writable paths closed.
             (((8#$mode & 0002) == 0)) || return 0
         fi
-        acl_listing=$(/bin/ls -lde "$probe" 2> /dev/null) || return 0
-        if printf '%s\n' "$acl_listing" |
-            /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:.*[[:space:]]allow[[:space:]]'; then
-            return 0
+        if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
+            # Darwin-only ACL enumeration: GNU ls has no -e, so on Linux the
+            # mode-bit checks above are the whole verdict at this level.
+            acl_listing=$(/bin/ls -lde "$probe" 2> /dev/null) || return 0
+            if printf '%s\n' "$acl_listing" |
+                /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:.*[[:space:]]allow[[:space:]]'; then
+                return 0
+            fi
         fi
         [[ "$probe" == "/" ]] && break
         local parent_probe="${probe%/*}"
@@ -140,25 +177,29 @@ _update_lock_prepare_dir() {
     [[ -d "$lock_dir" && ! -L "$lock_dir" ]] || return 1
     # macOS preserves inherited ACLs across mkdir -m 0700. Clear them before
     # opening the kernel lock and verify that no non-mode ACL entry remains.
-    if [[ "$use_sudo" == "true" ]]; then
-        _update_lock_sudo /bin/chmod -N "$lock_dir" 2> /dev/null || return 1
-        acl_listing=$(_update_lock_sudo /bin/ls -lde "$lock_dir" 2> /dev/null) || return 1
-    else
-        /bin/chmod -N "$lock_dir" 2> /dev/null || return 1
-        acl_listing=$(/bin/ls -lde "$lock_dir" 2> /dev/null) || return 1
-    fi
-    if printf '%s\n' "$acl_listing" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'; then
-        return 1
+    # GNU chmod/ls have no -N/-e, and a Linux mkdir -m 0700 carries no
+    # inherited ACL entries to clear, so this sweep is darwin-only.
+    if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
+        if [[ "$use_sudo" == "true" ]]; then
+            _update_lock_sudo /bin/chmod -N "$lock_dir" 2> /dev/null || return 1
+            acl_listing=$(_update_lock_sudo /bin/ls -lde "$lock_dir" 2> /dev/null) || return 1
+        else
+            /bin/chmod -N "$lock_dir" 2> /dev/null || return 1
+            acl_listing=$(/bin/ls -lde "$lock_dir" 2> /dev/null) || return 1
+        fi
+        if printf '%s\n' "$acl_listing" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'; then
+            return 1
+        fi
     fi
     if [[ "$use_sudo" == "true" ]]; then
         expected_uid=0
     fi
     if [[ "$use_sudo" == "true" ]]; then
-        owner_uid=$(_update_lock_sudo /usr/bin/stat -f%u "$lock_dir" 2> /dev/null || true)
-        mode=$(_update_lock_sudo /usr/bin/stat -f%Lp "$lock_dir" 2> /dev/null || true)
+        owner_uid=$(_update_lock_sudo /usr/bin/stat "${_MOLE_STAT_UID_FLAG}" "$lock_dir" 2> /dev/null || true)
+        mode=$(_update_lock_sudo /usr/bin/stat "${_MOLE_STAT_MODE_FLAG}" "$lock_dir" 2> /dev/null || true)
     else
-        owner_uid=$(/usr/bin/stat -f%u "$lock_dir" 2> /dev/null || true)
-        mode=$(/usr/bin/stat -f%Lp "$lock_dir" 2> /dev/null || true)
+        owner_uid=$(/usr/bin/stat "${_MOLE_STAT_UID_FLAG}" "$lock_dir" 2> /dev/null || true)
+        mode=$(/usr/bin/stat "${_MOLE_STAT_MODE_FLAG}" "$lock_dir" 2> /dev/null || true)
     fi
     [[ "$owner_uid" == "$expected_uid" && "$mode" =~ ^[0-7]+$ ]] || return 1
     (((8#$mode & 0077) == 0)) || return 1
@@ -487,7 +528,7 @@ _update_self_heal_reinstall() {
         heal_output=$(
             set -o pipefail
             curl -fsSL --connect-timeout 10 --max-time 60 \
-                "https://raw.githubusercontent.com/tw93/mole/main/install.sh" |
+                "$(update_installer_url main)" |
                 MOLE_ASSUME_SUDO_AUTH="$assume_sudo" MOLE_VERSION="$update_ref" \
                     MOLE_INSTALL_COMMIT="$install_commit" MOLE_INSTALL_RECEIPT="$install_receipt" \
                     bash -s -- --prefix "$install_dir" --config "$config_dir" 2>&1
@@ -499,7 +540,7 @@ _update_self_heal_reinstall() {
         heal_output=$(
             set -o pipefail
             wget --timeout=10 --tries=3 -qO- \
-                "https://raw.githubusercontent.com/tw93/mole/main/install.sh" |
+                "$(update_installer_url main)" |
                 MOLE_ASSUME_SUDO_AUTH="$assume_sudo" MOLE_VERSION="$update_ref" \
                     MOLE_INSTALL_COMMIT="$install_commit" MOLE_INSTALL_RECEIPT="$install_receipt" \
                     bash -s -- --prefix "$install_dir" --config "$config_dir" 2>&1
@@ -525,8 +566,10 @@ _update_print_manual_reinstall() {
     printf -v quoted_ref '%q' "$update_ref"
     printf -v quoted_install_dir '%q' "$install_dir"
     printf -v quoted_config_dir '%q' "$config_dir"
-    printf '%s Reinstall manually: curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | MOLE_VERSION=%s bash -s -- --prefix %s --config %s\n' \
-        "${ICON_REVIEW}" "$quoted_ref" "$quoted_install_dir" "$quoted_config_dir"
+    local manual_url
+    manual_url=$(update_installer_url "$update_ref")
+    printf '%s Reinstall manually: curl -fsSL %s | MOLE_VERSION=%s bash -s -- --prefix %s --config %s\n' \
+        "${ICON_REVIEW}" "$manual_url" "$quoted_ref" "$quoted_install_dir" "$quoted_config_dir"
 }
 
 # Version discovery must report "unknown" by returning empty, never by failing.
@@ -537,14 +580,14 @@ _update_print_manual_reinstall() {
 # all that way. The trailing `|| true` is what keeps the failure recoverable.
 get_latest_version() {
     curl -fsSL --connect-timeout 2 --max-time 3 -H "Cache-Control: no-cache" \
-        "https://raw.githubusercontent.com/tw93/mole/main/mole" 2> /dev/null |
+        "https://raw.githubusercontent.com/${MOLE_UPDATE_REPO_SLUG}/main/mole" 2> /dev/null |
         grep '^VERSION=' | head -1 | sed 's/VERSION="\(.*\)"/\1/' || true
 }
 
 get_latest_version_from_github() {
     local version
     version=$(curl -fsSL --connect-timeout 2 --max-time 3 \
-        "https://api.github.com/repos/tw93/mole/releases/latest" 2> /dev/null |
+        "https://api.github.com/repos/${MOLE_UPDATE_REPO_SLUG}/releases/latest" 2> /dev/null |
         grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
     version="${version#v}"
     version="${version#V}"
@@ -746,10 +789,10 @@ get_latest_commit_from_github() {
     local sha=""
     if command -v curl > /dev/null 2>&1; then
         response=$(curl -fsSL --connect-timeout 2 --max-time 3 \
-            "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null || true)
+            "https://api.github.com/repos/${MOLE_UPDATE_REPO_SLUG}/commits/main" 2> /dev/null || true)
     elif command -v wget > /dev/null 2>&1; then
         response=$(wget --timeout=3 --tries=1 -qO- \
-            "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null || true)
+            "https://api.github.com/repos/${MOLE_UPDATE_REPO_SLUG}/commits/main" 2> /dev/null || true)
     fi
     sha=$(printf '%s\n' "$response" |
         grep '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' | head -1 | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/') || sha=""
@@ -792,7 +835,7 @@ get_latest_commit_from_github() {
             git -c credential.helper= -c core.askPass=/usr/bin/false \
             -c protocol.allow=never -c protocol.https.allow=always \
             -c http.sslVerify=true -C / \
-            ls-remote https://github.com/tw93/mole.git refs/heads/main \
+            ls-remote "https://github.com/${MOLE_UPDATE_REPO_SLUG}.git" refs/heads/main \
             2> /dev/null); then
             sha=$(printf '%s\n' "$response" |
                 awk '$2 == "refs/heads/main" { print $1; exit }')
@@ -866,7 +909,9 @@ check_for_updates() {
                 fi
 
                 if [[ -n "$latest" && "$VERSION" != "$latest" && "$(printf '%s\n' "$VERSION" "$latest" | sort -V | head -1)" == "$VERSION" ]]; then
-                    if is_homebrew_install; then
+                    # Homebrew is a darwin-only channel; linux script installs
+                    # always follow the fork's releases directly.
+                    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]] && is_homebrew_install; then
                         # For Homebrew, only notify if the brew tap has the new version available locally
                         local brew_latest
                         brew_latest=$(get_homebrew_latest_version || true)
@@ -897,10 +942,17 @@ ${GREEN}|_|  |_|\___/|_|\___|${NC}  ${GREEN}${MOLE_TAGLINE}${NC}
 
 EOF
 }
-
 show_version() {
     local os_ver
-    if command -v sw_vers > /dev/null; then
+    if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+        # Keep the linux report free of mac-only probes (sw_vers, csrutil).
+        os_ver=""
+        local os_release="${MOLE_OS_RELEASE_FILE:-/etc/os-release}"
+        if [[ -r "$os_release" ]]; then
+            os_ver=$(sed -n 's/^PRETTY_NAME=//p' "$os_release" 2> /dev/null | head -1 | tr -d '"')
+        fi
+        [[ -n "$os_ver" ]] || os_ver="$(uname -s) $(uname -r)"
+    elif command -v sw_vers > /dev/null; then
         os_ver=$(sw_vers -productVersion)
     else
         os_ver="Unknown"
@@ -912,19 +964,21 @@ show_version() {
     local kernel
     kernel=$(uname -r)
 
-    local sip_status
-    if command -v csrutil > /dev/null; then
-        sip_status=$(csrutil status 2> /dev/null | grep -o "enabled\|disabled" || echo "Unknown")
-        sip_status="$(LC_ALL=C tr '[:lower:]' '[:upper:]' <<< "${sip_status:0:1}")${sip_status:1}"
-    else
-        sip_status="Unknown"
+    local sip_status=""
+    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]]; then
+        if command -v csrutil > /dev/null; then
+            sip_status=$(csrutil status 2> /dev/null | grep -o "enabled\|disabled" || echo "Unknown")
+            sip_status="$(LC_ALL=C tr '[:lower:]' '[:upper:]' <<< "${sip_status:0:1}")${sip_status:1}"
+        else
+            sip_status="Unknown"
+        fi
     fi
 
     local disk_free
     disk_free=$(get_free_space)
 
     local install_method="Manual"
-    if is_homebrew_install; then
+    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]] && is_homebrew_install; then
         install_method="Homebrew"
     fi
 
@@ -945,10 +999,14 @@ show_version() {
             printf 'Channel: Nightly\n' 2> /dev/null || return 0
         fi
     fi
-    printf 'macOS: %s\n' "$os_ver" 2> /dev/null || return 0
+    local os_label="macOS"
+    [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]] && os_label="OS"
+    printf '%s: %s\n' "$os_label" "$os_ver" 2> /dev/null || return 0
     printf 'Architecture: %s\n' "$arch" 2> /dev/null || return 0
     printf 'Kernel: %s\n' "$kernel" 2> /dev/null || return 0
-    printf 'SIP: %s\n' "$sip_status" 2> /dev/null || return 0
+    if [[ -n "$sip_status" ]]; then
+        printf 'SIP: %s\n' "$sip_status" 2> /dev/null || return 0
+    fi
     printf 'Disk Free: %s\n' "$disk_free" 2> /dev/null || return 0
     printf 'Install: %s\n' "$install_method" 2> /dev/null || return 0
     printf 'Shell: %s\n\n' "${SHELL:-Unknown}" 2> /dev/null || return 0
@@ -977,7 +1035,9 @@ show_help() {
     printf "  %s%-28s%s %s\n" "$GREEN" "mo history --json" "$NC" "Export cleanup history"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo purge --dry-run" "$NC" "Preview project purge"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo installer --dry-run" "$NC" "Preview installer cleanup"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo touchid enable --dry-run" "$NC" "Preview Touch ID setup"
+    if [[ "${MOLE_PLATFORM:-}" == "darwin" ]]; then
+        printf "  %s%-28s%s %s\n" "$GREEN" "mo touchid enable --dry-run" "$NC" "Preview Touch ID setup"
+    fi
     printf "  %s%-28s%s %s\n" "$GREEN" "mo completion --dry-run" "$NC" "Preview shell completion edits"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo purge --paths" "$NC" "Configure scan directories"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo analyze /Volumes" "$NC" "Analyze external drives only"
@@ -1011,7 +1071,9 @@ update_mole() (
     trap '_update_cleanup; update_interrupted=true; echo ""; exit 130' INT TERM
     trap '_update_cleanup' EXIT
 
-    if is_homebrew_install; then
+    # Homebrew is a darwin-only channel. Linux installs always follow the
+    # fork's script installer, even when a Linuxbrew binary happens to exist.
+    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]] && is_homebrew_install; then
         if [[ "$nightly_update" == "true" ]]; then
             local review_icon="${ICON_REVIEW:-⊙}"
             log_error "Nightly update is only available for script installations. Homebrew installs follow stable releases."
@@ -1136,7 +1198,7 @@ update_mole() (
     if [[ "$nightly_update" != "true" ]]; then
         installer_ref="V${latest#V}"
     fi
-    local installer_url="https://raw.githubusercontent.com/tw93/mole/${installer_ref}/install.sh"
+    local installer_url="$(update_installer_url "$installer_ref")"
     local tmp_installer
     tmp_installer="$(mktemp_file)" || {
         log_error "Update failed"
@@ -1340,6 +1402,8 @@ update_mole() (
 
     rm -f "$tmp_installer"
     rm -f "$HOME/.cache/mole/update_message"
+
+    _update_print_linux_aur_hint
 
     # Cleanup and reset trap
     _update_cleanup

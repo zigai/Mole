@@ -198,7 +198,7 @@ perform_purge() {
                 current_path=$(cat "$stats_dir/purge_scanning" 2> /dev/null || echo "")
 
                 if [[ -n "$current_path" ]]; then
-                    local display_path="${current_path/#$HOME/~}"
+                    local display_path="${current_path/#"$HOME"/\~}"
                     display_path=$(compact_purge_scan_path "$display_path" "$max_path_len")
                     last_path="$display_path"
                 fi

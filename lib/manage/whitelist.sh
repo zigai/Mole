@@ -91,25 +91,10 @@ save_whitelist_patterns() {
 get_all_cache_items() {
     # Format: "display_name|pattern|category"
     cat << 'EOF'
-Apple Mail cache|$HOME/Library/Caches/com.apple.mail/*|system_cache
 Gradle build cache (Android Studio, Gradle projects)|$HOME/.gradle/caches/build-cache-*/*|ide_cache
 Gradle daemon processes cache|$HOME/.gradle/daemon/*|ide_cache
 Gradle worker cache|$HOME/.gradle/workers/*|ide_cache
-Xcode DerivedData (build outputs, indexes)|$HOME/Library/Developer/Xcode/DerivedData/*|ide_cache
-Xcode internal cache files|$HOME/Library/Caches/com.apple.dt.Xcode/*|ide_cache
-Xcode iOS device support symbols|$HOME/Library/Developer/Xcode/iOS DeviceSupport/*/Symbols/System/Library/Caches/*|ide_cache
-JetBrains IDEs data (IntelliJ, PyCharm, WebStorm, GoLand)|$HOME/Library/Application Support/JetBrains/*|ide_cache
-JetBrains IDEs cache|$HOME/Library/Caches/JetBrains/*|ide_cache
-Android Studio cache and indexes|$HOME/Library/Caches/Google/AndroidStudio*/*|ide_cache
 Android build cache|$HOME/.android/build-cache/*|ide_cache
-VS Code runtime cache|$HOME/Library/Application Support/Code/Cache/*|ide_cache
-VS Code extension and update cache|$HOME/Library/Application Support/Code/CachedData/*|ide_cache
-VS Code system cache (Cursor, VSCodium)|$HOME/Library/Caches/com.microsoft.VSCode/*|ide_cache
-Cursor editor cache|$HOME/Library/Caches/com.todesktop.230313mzl4w4u92/*|ide_cache
-LM Studio app cache|$HOME/Library/Caches/com.lmstudio.lmstudio/*|ai_ml_cache
-Codex Desktop update staging|$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation|ai_ml_cache
-Chrome on-device AI models|$HOME/Library/Application Support/Google/Chrome/OptGuideOnDevice*/*|ai_ml_cache
-Chrome optimization guide models|$HOME/Library/Application Support/Google/Chrome/optimization_guide_model_store/*|ai_ml_cache
 Bazel build cache|$HOME/.cache/bazel/*|compiler_cache
 Rust Cargo registry cache|$HOME/.cargo/registry/cache/*|compiler_cache
 Rust documentation cache|$HOME/.rustup/toolchains/*/share/doc/*|compiler_cache
@@ -124,35 +109,55 @@ pre-commit hooks cache|$HOME/.cache/pre-commit/*|compiler_cache
 Ruff Python linter cache|$HOME/.cache/ruff/*|compiler_cache
 MyPy type checker cache|$HOME/.cache/mypy/*|compiler_cache
 Pytest test cache|$HOME/.pytest_cache/*|compiler_cache
-PyInstaller binary cache|$HOME/Library/Application Support/pyinstaller/bincache*|compiler_cache
 Flutter SDK cache|$HOME/.cache/flutter/*|compiler_cache
 Swift Package Manager cache|$HOME/.cache/swift-package-manager/*|compiler_cache
 Zig compiler cache|$HOME/.cache/zig/*|compiler_cache
-CocoaPods cache (iOS dependencies)|$HOME/Library/Caches/CocoaPods/*|package_manager
 npm package cache|$HOME/.npm/_cacache/*|package_manager
 pip Python package cache|$HOME/.cache/pip/*|package_manager
 uv Python package cache|$HOME/.cache/uv/*|package_manager
-R renv global cache (virtual environments)|$HOME/Library/Caches/org.R-project.R/R/renv/*|package_manager
-tealdeer tldr pages cache|$HOME/Library/Caches/tealdeer/tldr-pages|package_manager
-Homebrew downloaded packages|$HOME/Library/Caches/Homebrew/*|package_manager
 Yarn package manager cache|$HOME/.cache/yarn/*|package_manager
-pnpm package store|$HOME/Library/pnpm/store/*|package_manager
 Composer PHP dependencies cache (legacy)|$HOME/.composer/cache/*|package_manager
-Composer PHP dependencies cache|$HOME/Library/Caches/composer/*|package_manager
 RubyGems cache|$HOME/.gem/cache/*|package_manager
 Conda package metadata/tarball cache|$HOME/.conda/pkgs|package_manager
 Anaconda package metadata/tarball cache|$HOME/anaconda3/pkgs|package_manager
-Playwright browser binaries|$HOME/Library/Caches/ms-playwright*|ai_ml_cache
 Selenium WebDriver binaries|$HOME/.cache/selenium/*|ai_ml_cache
 Ollama local AI models|$HOME/.ollama/models/*|ai_ml_cache
+Docker BuildX cache|$HOME/.docker/buildx/cache/*|container_cache
+Podman container cache|$HOME/.local/share/containers/cache/*|container_cache
+EOF
+    # macOS-only stores ($HOME/Library/** and Mac app containers) are noise on
+    # a Linux host where those paths never exist; offer them only on darwin.
+    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]]; then
+        cat << 'EOF'
+Apple Mail cache|$HOME/Library/Caches/com.apple.mail/*|system_cache
+Xcode DerivedData (build outputs, indexes)|$HOME/Library/Developer/Xcode/DerivedData/*|ide_cache
+Xcode internal cache files|$HOME/Library/Caches/com.apple.dt.Xcode/*|ide_cache
+Xcode iOS device support symbols|$HOME/Library/Developer/Xcode/iOS DeviceSupport/*/Symbols/System/Library/Caches/*|ide_cache
+JetBrains IDEs data (IntelliJ, PyCharm, WebStorm, GoLand)|$HOME/Library/Application Support/JetBrains/*|ide_cache
+JetBrains IDEs cache|$HOME/Library/Caches/JetBrains/*|ide_cache
+Android Studio cache and indexes|$HOME/Library/Caches/Google/AndroidStudio*/*|ide_cache
+VS Code runtime cache|$HOME/Library/Application Support/Code/Cache/*|ide_cache
+VS Code extension and update cache|$HOME/Library/Application Support/Code/CachedData/*|ide_cache
+VS Code system cache (Cursor, VSCodium)|$HOME/Library/Caches/com.microsoft.VSCode/*|ide_cache
+Cursor editor cache|$HOME/Library/Caches/com.todesktop.230313mzl4w4u92/*|ide_cache
+LM Studio app cache|$HOME/Library/Caches/com.lmstudio.lmstudio/*|ai_ml_cache
+Codex Desktop update staging|$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation|ai_ml_cache
+Chrome on-device AI models|$HOME/Library/Application Support/Google/Chrome/OptGuideOnDevice*/*|ai_ml_cache
+Chrome optimization guide models|$HOME/Library/Application Support/Google/Chrome/optimization_guide_model_store/*|ai_ml_cache
+PyInstaller binary cache|$HOME/Library/Application Support/pyinstaller/bincache*|compiler_cache
+CocoaPods cache (iOS dependencies)|$HOME/Library/Caches/CocoaPods/*|package_manager
+R renv global cache (virtual environments)|$HOME/Library/Caches/org.R-project.R/R/renv/*|package_manager
+tealdeer tldr pages cache|$HOME/Library/Caches/tealdeer/tldr-pages|package_manager
+Homebrew downloaded packages|$HOME/Library/Caches/Homebrew/*|package_manager
+pnpm package store|$HOME/Library/pnpm/store/*|package_manager
+Composer PHP dependencies cache|$HOME/Library/Caches/composer/*|package_manager
+Playwright browser binaries|$HOME/Library/Caches/ms-playwright*|ai_ml_cache
 Safari web browser cache|$HOME/Library/Caches/com.apple.Safari/*|browser_cache
 Chrome browser cache|$HOME/Library/Caches/Google/Chrome/*|browser_cache
 Firefox browser cache|$HOME/Library/Caches/Firefox/*|browser_cache
 Brave browser cache|$HOME/Library/Caches/BraveSoftware/Brave-Browser/*|browser_cache
 Surge proxy cache|$HOME/Library/Caches/com.nssurge.surge-mac/*|network_tools
 Surge configuration and data|$HOME/Library/Application Support/com.nssurge.surge-mac/*|network_tools
-Docker BuildX cache|$HOME/.docker/buildx/cache/*|container_cache
-Podman container cache|$HOME/.local/share/containers/cache/*|container_cache
 Tart OCI/IPSW cache|$HOME/.tart/cache|container_cache
 Font cache|$HOME/Library/Caches/com.apple.FontRegistry/*|system_cache
 Spotlight metadata cache|$HOME/Library/Caches/com.apple.spotlight/*|system_cache
@@ -161,6 +166,7 @@ Trash|$HOME/.Trash|system_cache
 iOS/iPadOS device firmware (.ipsw) from iTunes/Finder|$HOME/Library/iTunes/*Software Updates/*.ipsw|system_cache
 Apple Configurator 2 device firmware (.ipsw)|$HOME/Library/Group Containers/*.group.com.apple.configurator/**/*.ipsw|system_cache
 EOF
+    fi
     local go_cache_root
     if go_cache_root=$(mole_go_cache_root GOCACHE); then
         printf 'Go build cache|%s/*|compiler_cache\n' "$go_cache_root"
@@ -334,13 +340,13 @@ manage_whitelist_categories() {
     if [[ "$mode" == "optimize" ]]; then
         items_source=$(get_optimize_whitelist_items)
         active_config_file="$WHITELIST_CONFIG_OPTIMIZE"
-        local display_config="${active_config_file/#$HOME/~}"
+        local display_config="${active_config_file/#"$HOME"/\~}"
         menu_title="Whitelist Manager, Select optimize tasks to ignore
 ${GRAY}Edit: ${display_config}${NC}"
     else
         items_source=$(get_all_cache_items)
         active_config_file="$WHITELIST_CONFIG_CLEAN"
-        local display_config="${active_config_file/#$HOME/~}"
+        local display_config="${active_config_file/#"$HOME"/\~}"
         menu_title="Whitelist Manager, Select caches to protect
 ${GRAY}Edit: ${display_config}${NC}"
     fi
@@ -452,7 +458,7 @@ ${GRAY}Edit: ${display_config}${NC}"
             if [[ $idx -ge 0 && $idx -lt ${#cache_patterns[@]} ]]; then
                 local pattern="${cache_patterns[$idx]}"
                 # Convert back to portable format with ~
-                pattern="${pattern/#$HOME/~}"
+                pattern="${pattern/#"$HOME"/\~}"
                 selected_patterns+=("$pattern")
             fi
         done
@@ -484,7 +490,7 @@ ${GRAY}Edit: ${display_config}${NC}"
     else
         summary_lines+=("Protected ${total_protected} caches")
     fi
-    local display_config="${active_config_file/#$HOME/~}"
+    local display_config="${active_config_file/#"$HOME"/\~}"
     summary_lines+=("Config: ${GRAY}${display_config}${NC}")
 
     print_summary_block "${summary_lines[@]}"
