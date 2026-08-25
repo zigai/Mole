@@ -17,6 +17,19 @@ readonly MOLE_BASE_LOADED=1
 # once here rather than at each read site; entry points still assign over it.
 : "${DRY_RUN:=false}"
 
+# Resolve the execution platform before any policy tables assemble below.
+# lib/platform/platform.sh re-runs the authoritative detection when sourced;
+# filling the variable here only covers direct lib sourcing and keeps every
+# downstream switch reading one variable ($MOLE_PLATFORM).
+if [[ -z "${MOLE_PLATFORM:-}" ]]; then
+    case "$(uname -s 2> /dev/null || echo unknown)" in
+        Darwin) MOLE_PLATFORM="darwin" ;;
+        Linux) MOLE_PLATFORM="linux" ;;
+        *) MOLE_PLATFORM="unknown" ;;
+    esac
+    export MOLE_PLATFORM
+fi
+
 # ============================================================================
 # Color Definitions
 # Honor https://no-color.org: any non-empty NO_COLOR disables ANSI escapes.
@@ -146,51 +159,73 @@ readonly MOLE_ONE_GB_BYTES=1000000000
 # Whitelist Configuration
 # ============================================================================
 readonly FINDER_METADATA_SENTINEL="FINDER_METADATA"
-declare -a DEFAULT_WHITELIST_PATTERNS=(
-    "$HOME/Library/Caches/ms-playwright*"
-    "$HOME/.gradle/caches/*"
-    "$HOME/.gradle/daemon/*"
-    "$HOME/.ollama/models/*"
-    "$HOME/Library/Caches/com.nssurge.surge-mac/*"
-    "$HOME/Library/Application Support/com.nssurge.surge-mac/*"
-    "$HOME/Library/Caches/org.R-project.R/R/renv/*"
-    "$HOME/Library/Caches/JetBrains*"
-    "$HOME/Library/Caches/com.jetbrains.toolbox*"
-    "$HOME/Library/Caches/tealdeer/tldr-pages"
-    "$HOME/Library/Application Support/JetBrains*"
-    "$HOME/Library/Caches/com.apple.finder"
-    "$HOME/Library/Mobile Documents*"
-    "$FINDER_METADATA_SENTINEL"
-)
+declare -a DEFAULT_WHITELIST_PATTERNS=()
+declare -a DEFAULT_OPTIMIZE_WHITELIST_PATTERNS=()
+declare -a SAFETY_WHITELIST_PATTERNS=()
 
-declare -a DEFAULT_OPTIMIZE_WHITELIST_PATTERNS=(
-)
+# Platform-conditional assembly (contract §4): the darwin sets keep their
+# pre-fork form verbatim; linux gets XDG-rooted equivalents instead of
+# macOS-only paths that can never match.
+if [[ "${MOLE_PLATFORM}" == "linux" ]]; then
+    # Convenience defaults (fully replaceable by a user whitelist file).
+    DEFAULT_WHITELIST_PATTERNS=(
+        "$HOME/.cache/ms-playwright*"
+        "$HOME/.gradle/caches/*"
+        "$HOME/.gradle/daemon/*"
+        "$HOME/.ollama/models/*"
+        "$HOME/.cache/JetBrains*"
+        "$HOME/.cache/tealdeer/tldr-pages"
+    )
+    # Hard safety, merged unconditionally: Mole's own cache/state roots must
+    # survive every sweep (contract §3), and the freedesktop Trash must stay
+    # intact so trash-routed deletions remain recoverable.
+    SAFETY_WHITELIST_PATTERNS=(
+        "${XDG_CACHE_HOME:-$HOME/.cache}/mole*"
+        "${XDG_STATE_HOME:-$HOME/.local/state}/mole*"
+    )
+else
+    declare -a DEFAULT_WHITELIST_PATTERNS=(
+        "$HOME/Library/Caches/ms-playwright*"
+        "$HOME/.gradle/caches/*"
+        "$HOME/.gradle/daemon/*"
+        "$HOME/.ollama/models/*"
+        "$HOME/Library/Caches/com.nssurge.surge-mac/*"
+        "$HOME/Library/Application Support/com.nssurge.surge-mac/*"
+        "$HOME/Library/Caches/org.R-project.R/R/renv/*"
+        "$HOME/Library/Caches/JetBrains*"
+        "$HOME/Library/Caches/com.jetbrains.toolbox*"
+        "$HOME/Library/Caches/tealdeer/tldr-pages"
+        "$HOME/Library/Application Support/JetBrains*"
+        "$HOME/Library/Caches/com.apple.finder"
+        "$HOME/Library/Mobile Documents*"
+        "$FINDER_METADATA_SENTINEL"
+    )
 
-# Safety patterns always merge into an existing user whitelist file.
-# Replacement semantics (V1.7.5+) treat the file as the complete set, so
-# protections added later (FINDER_METADATA in V1.9.9) never reached users who
-# already had a whitelist. Only hard safety belongs here; optional convenience
-# defaults stay in DEFAULT_WHITELIST_PATTERNS and remain fully replaceable.
-declare -a SAFETY_WHITELIST_PATTERNS=(
-    "$FINDER_METADATA_SENTINEL"
-    # `clean_user_essentials` sweeps every child of ~/Library/Caches, so a row
-    # that only lives in DEFAULT_WHITELIST_PATTERNS stops protecting these the
-    # moment a user saves one custom entry. Removing them breaks macOS search,
-    # font rendering and iCloud sync rather than costing a rebuild, and
-    # pypoetry/virtualenvs holds live interpreters every Poetry project points
-    # at, not cached downloads. Hard safety, so they merge unconditionally.
-    "$HOME/Library/Caches/com.apple.FontRegistry*"
-    "$HOME/Library/Caches/com.apple.spotlight*"
-    "$HOME/Library/Caches/com.apple.Spotlight*"
-    "$HOME/Library/Caches/CloudKit*"
-    "$HOME/Library/Caches/pypoetry/virtualenvs*"
-)
+    # Safety patterns always merge into an existing user whitelist file.
+    # Replacement semantics (V1.7.5+) treat the file as the complete set, so
+    # protections added later (FINDER_METADATA in V1.9.9) never reached users who
+    # already had a whitelist. Only hard safety belongs here; optional convenience
+    # defaults stay in DEFAULT_WHITELIST_PATTERNS and remain fully replaceable.
+    SAFETY_WHITELIST_PATTERNS=(
+        "$FINDER_METADATA_SENTINEL"
+        # `clean_user_essentials` sweeps every child of ~/Library/Caches, so a row
+        # that only lives in DEFAULT_WHITELIST_PATTERNS stops protecting these the
+        # moment a user saves one custom entry. Removing them breaks macOS search,
+        # font rendering and iCloud sync rather than costing a rebuild, and
+        # pypoetry/virtualenvs holds live interpreters every Poetry project points
+        # at, not cached downloads. Hard safety, so they merge unconditionally.
+        "$HOME/Library/Caches/com.apple.FontRegistry*"
+        "$HOME/Library/Caches/com.apple.spotlight*"
+        "$HOME/Library/Caches/com.apple.Spotlight*"
+        "$HOME/Library/Caches/CloudKit*"
+        "$HOME/Library/Caches/pypoetry/virtualenvs*"
+    )
+fi
 
 # Resolve the cache root used by GitHub CLI without following filesystem
 # links. Both cleanup and whitelist inventory consume this value so a custom
 # XDG_CACHE_HOME cannot make the saved protection point at a different path.
 mole_github_cli_cache_root() {
-    local cache_root
     if [[ -n "${XDG_CACHE_HOME:-}" ]]; then
         cache_root="$XDG_CACHE_HOME"
     else
@@ -393,6 +428,30 @@ load_mole_whitelist() {
                     ;;
             esac
 
+            # Linux critical denies (contract §4): never whitelisted, so
+            # every WHITELIST_PATTERNS consumer refuses these even when a
+            # user whitelist file asks for them explicitly. ~/.config denies
+            # the directory itself only; children stay whitelisable.
+            if [[ "${MOLE_PLATFORM}" == "linux" ]]; then
+                case "$line" in
+                    /boot | /boot/* | /efi | /efi/* | \
+                        /usr | /usr/* | /bin | /bin/* | /sbin | /sbin/* | \
+                        /lib | /lib/* | /lib64 | /lib64/* | /proc | /proc/* | \
+                        /sys | /sys/* | /dev | /dev/* | /run | /run/* | /srv | /srv/* | \
+                        /var/lib/pacman | /var/lib/pacman/* | /var/lib/rpm | /var/lib/rpm/* | \
+                        "$MOLE_USER_HOME"/.ssh | "$MOLE_USER_HOME"/.ssh/* | \
+                        "$MOLE_USER_HOME"/.gnupg | "$MOLE_USER_HOME"/.gnupg/* | \
+                        "$MOLE_USER_HOME"/.password-store | "$MOLE_USER_HOME"/.password-store/* | \
+                        "$MOLE_USER_HOME"/.pki | "$MOLE_USER_HOME"/.pki/* | \
+                        "$MOLE_USER_HOME"/.kube | "$MOLE_USER_HOME"/.kube/* | \
+                        "$MOLE_USER_HOME"/.aws | "$MOLE_USER_HOME"/.aws/* | \
+                        "$MOLE_USER_HOME"/.config)
+                        WHITELIST_WARNINGS+=("Protected system path: $line")
+                        continue
+                        ;;
+                esac
+            fi
+
             duplicate="false"
             if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
                 for existing in "${WHITELIST_PATTERNS[@]}"; do
@@ -426,15 +485,40 @@ load_mole_whitelist() {
 }
 
 # ============================================================================
-# BSD Stat Compatibility
+# Stat Compatibility (BSD / GNU)
 # ============================================================================
 readonly STAT_BSD="/usr/bin/stat"
+
+# stat(1) format flags differ between the BSD and GNU implementations: BSD
+# takes `-f<fmt>`, GNU (Linux) takes `-c<fmt>` and renames fields (%z -> %s,
+# %m -> %Y, %Su -> %U). Resolved once from $MOLE_PLATFORM so every consumer
+# in base.sh and file_ops.sh reads one variable instead of repeating the
+# platform switch.
+if [[ "${MOLE_PLATFORM}" == "linux" ]]; then
+    _MOLE_STAT_SIZE_FLAG="-c%s"            # st_size in bytes
+    _MOLE_STAT_MTIME_FLAG="-c%Y"           # st_mtime epoch seconds
+    _MOLE_STAT_OWNER_FLAG="-c%U"           # owner user name
+    _MOLE_STAT_UID_FLAG="-c%u"
+    _MOLE_STAT_MODE_FLAG="-c%a"           # permission bits, octal             # owner uid
+    _MOLE_STAT_BLOCKS_FLAG="-c%b"          # st_blocks, 512-byte units
+    _MOLE_STAT_ID_MTIME_FLAG="-c%d:%i:%Y"  # dev:inode:mtime identity probe
+    _MOLE_STAT_ID_FLAG="-c%d:%i"           # dev:inode identity probe
+else
+    _MOLE_STAT_SIZE_FLAG="-f%z"
+    _MOLE_STAT_MTIME_FLAG="-f%m"
+    _MOLE_STAT_OWNER_FLAG="-f%Su"
+    _MOLE_STAT_UID_FLAG="-f%u"
+    _MOLE_STAT_MODE_FLAG="-f%Mp%Lp"
+    _MOLE_STAT_BLOCKS_FLAG="-f%b"
+    _MOLE_STAT_ID_MTIME_FLAG="-f%d:%i:%m"
+    _MOLE_STAT_ID_FLAG="-f%d:%i"
+fi
 
 # Get file size in bytes
 get_file_size() {
     local file="$1"
     local result
-    result=$($STAT_BSD -f%z "$file" 2> /dev/null)
+    result=$($STAT_BSD "$_MOLE_STAT_SIZE_FLAG" "$file" 2> /dev/null)
     echo "${result:-0}"
 }
 
@@ -446,7 +530,7 @@ get_file_mtime() {
         return
     }
     local result
-    result=$($STAT_BSD -f%m "$file" 2> /dev/null || echo "")
+    result=$($STAT_BSD "$_MOLE_STAT_MTIME_FLAG" "$file" 2> /dev/null || echo "")
     if [[ "$result" =~ ^[0-9]+$ ]]; then
         echo "$result"
     else
@@ -475,7 +559,7 @@ get_epoch_seconds() {
 # Get file owner username
 get_file_owner() {
     local file="$1"
-    $STAT_BSD -f%Su "$file" 2> /dev/null || echo ""
+    $STAT_BSD "$_MOLE_STAT_OWNER_FLAG" "$file" 2> /dev/null || echo ""
 }
 
 # ============================================================================
@@ -616,6 +700,10 @@ get_user_home() {
         home=$(dscl . -read "/Users/$user" NFSHomeDirectory 2> /dev/null | awk '{print $2}' | head -1 || true)
     fi
 
+    if [[ -z "$home" && "${MOLE_PLATFORM:-}" == "linux" ]]; then
+        home=$(getent passwd "$user" 2> /dev/null | cut -d: -f6 || true)
+    fi
+
     if [[ -z "$home" ]]; then
         home=$(id -P "$user" 2> /dev/null | cut -d: -f9 || true)
     fi
@@ -676,7 +764,7 @@ ensure_user_dir() {
         # Early stop: if ownership is already correct, no need to continue up the tree
         if [[ -d "$dir" ]]; then
             local current_uid
-            current_uid=$("$STAT_BSD" -f%u "$dir" 2> /dev/null || echo "")
+            current_uid=$("$STAT_BSD" "$_MOLE_STAT_UID_FLAG" "$dir" 2> /dev/null || echo "")
             if [[ "$current_uid" == "$owner_uid" ]]; then
                 break
             fi
@@ -870,7 +958,10 @@ percent_encode_path() {
 # the ~-abbreviated path; piped output and non-ANSI terminals get plain text.
 format_path_link() {
     local path="$1"
-    local display="${path/#$HOME/~}"
+    # Quote the home prefix and escape the replacement tilde: on bash >= 5
+    # an unquoted ~ in the replacement is tilde-expanded back to $HOME,
+    # turning the collapse into a no-op (bash 3.2 did not do this).
+    local display="${path/#"$HOME"/\~}"
     if ! is_ansi_supported 2> /dev/null; then
         printf '%s' "$display"
         return 0

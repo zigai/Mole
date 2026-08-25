@@ -619,6 +619,33 @@ _mole_is_critical_deletion_path() {
             ;;
     esac
 
+    # Linux critical denies (contract §4). Compiled only on linux so the
+    # darwin policy above stays byte-equivalent. /etc /usr /bin /sbin and
+    # /var/db are already refused by the shared arms above; these are the
+    # remaining linux-only roots plus user secret stores. ~/.config denies
+    # the directory itself only; app children stay deletable.
+    if [[ "${MOLE_PLATFORM}" == "linux" ]]; then
+        local linux_home="${HOME%/}"
+        case "$path" in
+            /boot | /boot/* | /efi | /efi/* | \
+                /proc | /proc/* | /sys | /sys/* | /dev | /dev/* | \
+                /run | /run/* | /srv | /srv/* | \
+                /lib | /lib/* | /lib64 | /lib64/* | \
+                /var/lib/pacman | /var/lib/pacman/* | /var/lib/rpm | /var/lib/rpm/*)
+                return 0
+                ;;
+            "$linux_home"/.ssh | "$linux_home"/.ssh/* | \
+                "$linux_home"/.gnupg | "$linux_home"/.gnupg/* | \
+                "$linux_home"/.password-store | "$linux_home"/.password-store/* | \
+                "$linux_home"/.pki | "$linux_home"/.pki/* | \
+                "$linux_home"/.kube | "$linux_home"/.kube/* | \
+                "$linux_home"/.aws | "$linux_home"/.aws/* | \
+                "$linux_home"/.config)
+                return 0
+                ;;
+        esac
+    fi
+
     # Reject a user home root (/Users/<name>) while keeping its children
     # deletable. A single case glob cannot express "exactly one component
     # under /Users", so match one level here: this catches the empty-variable
@@ -997,7 +1024,7 @@ safe_remove() {
                 if [[ -f "$path" || -d "$path" ]] && ! [[ -L "$path" ]]; then
                     local mod_time=0
                     local stat_rc=0
-                    mod_time=$(stat -f%m "$path" 2> /dev/null) || stat_rc=$?
+                    mod_time=$(stat "$_MOLE_STAT_MTIME_FLAG" "$path" 2> /dev/null) || stat_rc=$?
                     if [[ $stat_rc -eq 124 || $stat_rc -ge 128 ]]; then
                         _mole_record_clean_cancellation "$stat_rc"
                         return "$stat_rc"
@@ -1260,7 +1287,7 @@ _mole_privileged_path_has_mutable_ancestor() {
 
         local owner_uid=""
         local mode=""
-        owner_uid=$($STAT_BSD -f%u "$probe" 2> /dev/null || true)
+        owner_uid=$($STAT_BSD "${_MOLE_STAT_UID_FLAG}" "$probe" 2> /dev/null || true)
         mode=$($STAT_BSD -f%Lp "$probe" 2> /dev/null || true)
         if [[ ! "$owner_uid" =~ ^[0-9]+$ || ! "$mode" =~ ^[0-7]+$ ]]; then
             return 0
@@ -1432,7 +1459,7 @@ safe_sudo_remove() {
                     local mod_time=0
                     local stat_rc=0
                     mod_time=$(_mole_bounded_sudo "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
-                        -n stat -f%m "$path" < /dev/null 2> /dev/null) || stat_rc=$?
+                        -n stat "$_MOLE_STAT_MTIME_FLAG" "$path" < /dev/null 2> /dev/null) || stat_rc=$?
                     if [[ $stat_rc -eq 124 || $stat_rc -ge 128 ]]; then
                         _mole_record_clean_cancellation "$stat_rc"
                         return "$stat_rc"
@@ -1602,6 +1629,26 @@ safe_sudo_remove() {
 # size_kb is "unknown" when du could not measure the path (permission denied,
 # disappeared mid-call); never silently coerced to 0KB so post-hoc forensics
 # can tell measured-zero from measurement-failure.
+# Linux Trash routing (contract §6). Default delete mode stays "trash": move
+# the path with `gio trash` when the platform resolver reports gio. Returns 0
+# when the item moved to Trash; nonzero otherwise. The caller owns timeout
+# cancellation, the one-time user notice, and the permanent-delete fallback.
+_mole_linux_gio_trash() {
+    local path="$1"
+
+    local trash_cmd=""
+    if declare -F mole_trash_cmd > /dev/null 2>&1; then
+        trash_cmd=$(mole_trash_cmd 2> /dev/null || true)
+    fi
+    if [[ "$trash_cmd" != "gio" ]] || ! command -v gio > /dev/null 2>&1; then
+        debug_log "gio trash unavailable on this linux system: $path"
+        return 1
+    fi
+
+    run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+        gio trash -- "$path" > /dev/null 2>&1
+}
+
 mole_delete() {
     local path="$1"
     local needs_sudo="${2:-false}"
@@ -1696,7 +1743,7 @@ mole_delete() {
         local current_identity=""
         local identity_rc=0
         current_identity=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
-            "$STAT_BSD" -f%d:%i:%m "$path" 2> /dev/null) || identity_rc=$?
+            "$STAT_BSD" "$_MOLE_STAT_ID_MTIME_FLAG" "$path" 2> /dev/null) || identity_rc=$?
         if [[ $identity_rc -eq 124 || $identity_rc -ge 128 ]]; then
             local identity_status="interrupted"
             [[ $identity_rc -eq 124 ]] && identity_status="timed-out"
@@ -1737,9 +1784,34 @@ mole_delete() {
         fi
     fi
 
-    # Trash mode is a recoverable-delete contract. If Trash is unavailable,
-    # fail closed instead of silently switching to permanent removal.
-    if [[ "$mode" == "trash" ]]; then
+    # Trash mode is a recoverable-delete contract. On linux the move goes
+    # through `gio trash`; when gio is missing or the move fails, fall back
+    # to permanent deletion with a single notice line (contract §6). On
+    # darwin, an unavailable Trash fails closed instead.
+    if [[ "$mode" == "trash" && "${MOLE_PLATFORM}" == "linux" ]]; then
+        local linux_trash_rc=0
+        _mole_linux_gio_trash "$path" || linux_trash_rc=$?
+        if [[ $linux_trash_rc -eq 0 ]]; then
+            _mole_delete_log "trash" "$size_kb" "ok" "$path"
+            log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "TRASHED" "$path" "${size_kb}KB"
+            return 0
+        fi
+        if [[ $linux_trash_rc -eq 124 || $linux_trash_rc -ge 128 ]]; then
+            local linux_trash_status="interrupted"
+            [[ $linux_trash_rc -eq 124 ]] && linux_trash_status="timed-out"
+            _mole_delete_log "trash" "$size_kb" "$linux_trash_status" "$path"
+            return "$linux_trash_rc"
+        fi
+        if [[ -z "${_MOLE_LINUX_TRASH_FALLBACK_WARNED:-}" ]]; then
+            _MOLE_LINUX_TRASH_FALLBACK_WARNED=1
+            export _MOLE_LINUX_TRASH_FALLBACK_WARNED
+            printf 'Note: Trash unavailable (gio missing or move failed); deleting permanently.\n' >&2
+        fi
+        debug_log "gio Trash unavailable or failed; falling back to permanent delete: $path"
+        _mole_delete_log "trash" "$size_kb" "trash-unavailable-permanent-fallback" "$path"
+        # Fall through to the permanent sink below so validation, sudo
+        # handling, and operation logging stay on one shared path.
+    elif [[ "$mode" == "trash" ]]; then
         local trash_rc=0
         _mole_move_to_trash "$path" "$needs_sudo" \
             "$expected_parent" "$expected_parent_id" \
@@ -2002,7 +2074,7 @@ _mole_prepare_privileged_trash_stage_root() {
 
     local root_uid=""
     local root_mode=""
-    root_uid=$($STAT_BSD -f%u "$stage_root" 2> /dev/null || true)
+    root_uid=$($STAT_BSD "${_MOLE_STAT_UID_FLAG}" "$stage_root" 2> /dev/null || true)
     root_mode=$($STAT_BSD -f%Lp "$stage_root" 2> /dev/null || true)
     if [[ -L "$stage_root" || "$root_uid" != "0" || "$root_mode" != "711" ]]; then
         return 1
@@ -2094,7 +2166,7 @@ _mole_move_path_to_user_trash() {
     fi
 
     local trash_owner_uid=""
-    trash_owner_uid=$($STAT_BSD -f%u "$trash_dir" 2> /dev/null || true)
+    trash_owner_uid=$($STAT_BSD "${_MOLE_STAT_UID_FLAG}" "$trash_dir" 2> /dev/null || true)
     if [[ "$trash_owner_uid" != "$owner_uid" ]]; then
         debug_log "Refusing direct Trash move: invoking user does not own Trash: $trash_dir"
         return 1
@@ -2307,8 +2379,8 @@ _mole_snapshot_path_identity() {
     physical_parent=$(cd -P "$lexical_parent" 2> /dev/null && pwd -P) || return 1
     local parent_id=""
     local target_id=""
-    parent_id=$($STAT_BSD -f '%d:%i' "$physical_parent" 2> /dev/null || true)
-    target_id=$($STAT_BSD -f '%d:%i' "$path" 2> /dev/null || true)
+    parent_id=$($STAT_BSD "${_MOLE_STAT_ID_FLAG}" "$physical_parent" 2> /dev/null || true)
+    target_id=$($STAT_BSD "${_MOLE_STAT_ID_FLAG}" "$path" 2> /dev/null || true)
     [[ "$parent_id" =~ ^[0-9]+:[0-9]+$ && "$target_id" =~ ^[0-9]+:[0-9]+$ ]] || return 1
 
     _MOLE_PATH_SNAPSHOT_PARENT="$physical_parent"
@@ -2430,7 +2502,13 @@ _mole_delete_log() {
     local status="$3"
     local target="$4"
 
-    local log_file="${MOLE_DELETE_LOG:-$HOME/Library/Logs/mole/deletions.log}"
+    local default_delete_log="$HOME/Library/Logs/mole/deletions.log"
+    if command -v mole_state_dir > /dev/null 2>&1; then
+        default_delete_log="$(mole_state_dir)/deletions.log"
+    elif [[ "$(uname -s)" == "Linux" ]]; then
+        default_delete_log="${XDG_STATE_HOME:-$HOME/.local/state}/mole/deletions.log"
+    fi
+    local log_file="${MOLE_DELETE_LOG:-$default_delete_log}"
     local log_dir
     log_dir=$(dirname "$log_file")
 
@@ -2870,7 +2948,7 @@ safe_sudo_find_delete() {
                 "$deadline_seconds") || identity_rc=$?
             if [[ $identity_rc -eq 0 ]]; then
                 match_identity=$(_mole_bounded_sudo "$identity_timeout" \
-                    -n "$STAT_BSD" -f%d:%i:%m "$match" < /dev/null 2> /dev/null) || identity_rc=$?
+                    -n "$STAT_BSD" "$_MOLE_STAT_ID_MTIME_FLAG" "$match" < /dev/null 2> /dev/null) || identity_rc=$?
             fi
             if [[ $identity_rc -eq 124 || $identity_rc -ge 128 ]]; then
                 delete_rc=$identity_rc
@@ -2934,8 +3012,9 @@ safe_sudo_find_delete() {
                 _mole_bounded_sudo "$batch_timeout" \
                     -n xargs -0 /bin/sh -c '
                         stat_tool=$1
-                        age_days=$2
-                        shift 2
+                        stat_fmt=$2
+                        age_days=$3
+                        shift 3
                         for record do
                             dev=${record%%:*}
                             rest=${record#*:}
@@ -2946,15 +3025,15 @@ safe_sudo_find_delete() {
                             expected=$dev:$ino:$mtime
                             if [ "$age_days" -gt 0 ]; then
                                 actual=$(/usr/bin/find "$path" -maxdepth 0 -type f -mtime "+$age_days" \
-                                    -exec "$stat_tool" -f%d:%i:%m {} \; 2>/dev/null) || continue
+                                    -exec "$stat_tool" "$stat_fmt" {} \; 2>/dev/null) || continue
                             else
-                                actual=$($stat_tool -f%d:%i:%m "$path" 2>/dev/null) || continue
+                                actual=$($stat_tool "$stat_fmt" "$path" 2>/dev/null) || continue
                             fi
                             [ "$actual" = "$expected" ] || continue
                             /bin/rm -f -- "$path" || exit 1
                             printf "%s\0" "$path"
                         done
-                    ' sh "$STAT_BSD" "$age_days" > "$batch_result_file" 2> /dev/null || batch_rc=$?
+                    ' sh "$STAT_BSD" "$_MOLE_STAT_ID_MTIME_FLAG" "$age_days" > "$batch_result_file" 2> /dev/null || batch_rc=$?
 
             local batch_ts=""
             if oplog_enabled; then
@@ -3033,7 +3112,7 @@ get_path_size_kb() {
     # on the same physical-size basis as the directory fallback; logical size
     # can be much larger for APFS-cloned bundles and must not be mixed into the
     # same total as `du` results (#1404).
-    if [[ "$path" == *.app || "$path" == *.app/ ]]; then
+    if [[ "${MOLE_PLATFORM}" == "darwin" ]] && [[ "$path" == *.app || "$path" == *.app/ ]]; then
         local mdls_size
         local mdls_timeout=""
         local mdls_deadline_rc=0
@@ -3061,7 +3140,7 @@ get_path_size_kb() {
         [[ $stat_deadline_rc -eq 0 ]] || return "$stat_deadline_rc"
         local stat_rc=0
         blocks=$(run_with_timeout "$stat_timeout" stat \
-            -f%b "$path" < /dev/null 2> /dev/null) || stat_rc=$?
+            "$_MOLE_STAT_BLOCKS_FLAG" "$path" < /dev/null 2> /dev/null) || stat_rc=$?
         [[ $stat_rc -eq 124 || $stat_rc -ge 128 ]] && return "$stat_rc"
         if [[ "$blocks" =~ ^[0-9]+$ ]]; then
             echo $(((blocks + 1) / 2))
