@@ -625,3 +625,93 @@ readonly DATA_PROTECTED_BUNDLES=(
 # LaunchAgents) and find_app_system_files() (system LaunchAgents/Daemons) so the
 # two scans stay symmetric.
 readonly LAUNCH_AGENT_NAME_COMMON_WORDS="Music|Notes|Photos|Finder|Safari|Preview|Calendar|Contacts|Messages|Reminders|Clock|Weather|Stocks|Books|News|Podcasts|Voice|Files|Store|System|Helper|Agent|Daemon|Service|Update|Sync|Backup|Cloud|Manager|Monitor|Server|Client|Worker|Runner|Launcher|Driver|Plugin|Extension|Widget|Utility"
+
+# ============================================================================
+# Linux safety additions (contract §4)
+#
+# Platform-conditionally populated: on darwin these stay empty so the macOS
+# tables above keep their exact behavior. Consumed by app_protection.sh
+# (path denies, package denies) and lib/uninstall/leftovers.sh (review tier).
+# ============================================================================
+
+if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+    # System-critical packages: never surfaced for removal by `mo uninstall`
+    # and never removed as a dependency cascade target.
+    readonly SYSTEM_CRITICAL_PACKAGES=(
+        "bash"
+        "coreutils"
+        "filesystem"
+        "glibc"
+        "systemd"
+        "systemd-sysvcompat"
+        "util-linux"
+        "linux"
+        "linux-lts"
+        "linux-hardened"
+        "linux-firmware"
+        "mkinitcpio"
+        "grub"
+        "pacman"
+        "sudo"
+        "shadow"
+        "openssh"
+        "networkmanager"
+        "dbus"
+        "udev"
+    )
+
+    # Ids whose leftovers always go through the review-only tier even when
+    # the exact-id evidence would otherwise be safe.
+    readonly DATA_PROTECTED_IDS=(
+        "firefox"
+        "chromium"
+        "google-chrome"
+        "brave"
+        "thunderbird"
+        "keepassxc"
+        "docker"
+        "podman"
+        "libvirt"
+        "networkmanager"
+        "bluetooth"
+        "gpg-agent"
+        "ssh-agent"
+        "pipewire"
+        "wireplumber"
+    )
+
+    # Absolute system locations that must never be deleted. The user entries
+    # protect the directory AND its contents; ~/.config protects the
+    # directory itself only (children stay sweepable).
+    readonly LINUX_CRITICAL_SYSTEM_PATHS=(
+        "/boot"
+        "/boot/efi"
+        "/efi"
+        "/etc"
+        "/usr"
+        "/bin"
+        "/sbin"
+        "/lib"
+        "/lib64"
+        "/proc"
+        "/sys"
+        "/dev"
+        "/run"
+        "/srv"
+        "/var/lib/pacman"
+        "/var/lib/rpm"
+    )
+    readonly LINUX_CRITICAL_USER_PATHS=(
+        ".ssh"
+        ".gnupg"
+        ".password-store"
+        ".pki"
+        ".kube"
+        ".aws"
+    )
+else
+    readonly SYSTEM_CRITICAL_PACKAGES=()
+    readonly DATA_PROTECTED_IDS=()
+    readonly LINUX_CRITICAL_SYSTEM_PATHS=()
+    readonly LINUX_CRITICAL_USER_PATHS=()
+fi

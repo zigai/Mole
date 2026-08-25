@@ -9,6 +9,12 @@ if [[ -n "${MOLE_PKG_RECEIPTS_LOADED:-}" ]]; then
 fi
 readonly MOLE_PKG_RECEIPTS_LOADED=1
 
+# macOS-only helper (pkgutil receipts). On Linux, uninstall enumeration runs
+# through lib/uninstall/backends; loading this module is a no-op.
+if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+    return 0
+fi
+
 pkg_receipt_nonstandard_app_paths() {
     if ! command -v pkgutil > /dev/null 2>&1; then
         return 0
@@ -62,7 +68,7 @@ pkg_receipt_nonstandard_app_paths() {
         if declare -f get_file_mtime > /dev/null 2>&1; then
             cache_mtime=$(get_file_mtime "$cache_file")
         else
-            cache_mtime=$(stat -f "%m" "$cache_file" 2> /dev/null || echo 0)
+            cache_mtime=$(stat "${_MOLE_STAT_MTIME_FLAG}" "$cache_file" 2> /dev/null || echo 0)
         fi
         if [[ "$cache_ttl" =~ ^[0-9]+$ && "$cache_mtime" =~ ^[0-9]+$ &&
             "$now_epoch" =~ ^[0-9]+$ && $cache_ttl -gt 0 &&

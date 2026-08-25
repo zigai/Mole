@@ -11,6 +11,13 @@ if [[ -n "${_MOLE_BUNDLE_RESOLVER_LOADED:-}" ]]; then
 fi
 readonly _MOLE_BUNDLE_RESOLVER_LOADED=1
 
+# macOS-only resolver (mdfind / Info.plist / SMJobBless). On Linux the
+# underlying tools do not exist and uninstall enumeration runs through
+# lib/uninstall/backends instead, so the module loads no functions.
+if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+    return 0
+fi
+
 _MOLE_BUNDLE_RESOLVER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -z "${MOLE_TIMEOUTS_LOADED:-}" ]]; then
     # shellcheck source=lib/core/timeouts.sh

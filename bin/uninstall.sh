@@ -21,6 +21,17 @@ source "$SCRIPT_DIR/../lib/core/common.sh"
 trap cleanup_temp_files EXIT INT TERM
 source "$SCRIPT_DIR/../lib/ui/menu_paginated.sh"
 source "$SCRIPT_DIR/../lib/ui/app_selector.sh"
+# Linux uninstall enumeration and execution (contract §5). Sourced only on
+# Linux, and before batch.sh (which reassigns the global SCRIPT_DIR); the
+# macOS flow below stays byte-equivalent in effect.
+if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+    _MOLE_UNINSTALL_LINUX_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib/uninstall" && pwd)"
+    source "$_MOLE_UNINSTALL_LINUX_SRC/backends/pacman.sh"
+    source "$_MOLE_UNINSTALL_LINUX_SRC/backends/flatpak.sh"
+    source "$_MOLE_UNINSTALL_LINUX_SRC/backends/desktop.sh"
+    source "$_MOLE_UNINSTALL_LINUX_SRC/leftovers.sh"
+    source "$_MOLE_UNINSTALL_LINUX_SRC/enumerate.sh"
+fi
 source "$SCRIPT_DIR/../lib/uninstall/steam.sh"
 source "$SCRIPT_DIR/../lib/uninstall/batch.sh"
 
@@ -46,6 +57,11 @@ readonly MOLE_UNINSTALL_INLINE_MDLS_SIZE_TIMEOUT_SEC="${MOLE_UNINSTALL_INLINE_MD
 # cold-row count is small so a fully cold first scan keeps the fast path.
 readonly MOLE_UNINSTALL_INLINE_DU_SIZE_TIMEOUT_SEC="${MOLE_UNINSTALL_INLINE_DU_SIZE_TIMEOUT_SEC:-2}"
 readonly MOLE_UNINSTALL_INLINE_DU_MAX_COLD_ROWS="${MOLE_UNINSTALL_INLINE_DU_MAX_COLD_ROWS:-20}"
+
+# Linux metadata cache (contract: fingerprint = checksum of package + flatpak
+# lists). First line of the file is the fingerprint; the rest is the sorted
+# selector index, reused verbatim while the fingerprint matches.
+readonly MOLE_UNINSTALL_LINUX_CACHE_FILE="${MOLE_UNINSTALL_META_CACHE_DIR}/uninstall_app_metadata_linux_v1"
 
 uninstall_normalize_size_display() {
     local size="${1:-}"
@@ -530,6 +546,12 @@ uninstall_print_app_paths_with_mtime() {
 }
 
 uninstall_app_inventory_fingerprint() {
+    # Linux: fingerprint = checksum of the package + flatpak lists (contract §5).
+    if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+        enumerate_linux_fingerprint
+        return 0
+    fi
+
     local app_dir app_path app_mtime info_mtime pkg_app_path
 
     {
@@ -1044,10 +1066,64 @@ _scan_finalize_index() {
     fi
 }
 
+# Linux scan: enumerate through the backends and reuse the persisted index
+# while the inventory fingerprint matches. Echoes the sorted index file path
+# (registered as a temp file) or returns nonzero when enumeration fails.
+_linux_scan_applications() {
+    local out_file
+    out_file=$(create_temp_file)
+
+    ensure_user_dir "$MOLE_UNINSTALL_META_CACHE_DIR"
+    local cache_fingerprint=""
+    if [[ -r "$MOLE_UNINSTALL_LINUX_CACHE_FILE" ]]; then
+        cache_fingerprint=$(LC_ALL=C head -n 1 "$MOLE_UNINSTALL_LINUX_CACHE_FILE" 2> /dev/null || echo "")
+    fi
+
+    local current_fingerprint
+    current_fingerprint=$(enumerate_linux_fingerprint)
+
+    if [[ -n "$cache_fingerprint" && "$cache_fingerprint" == "$current_fingerprint" &&
+        $(wc -l < "$MOLE_UNINSTALL_LINUX_CACHE_FILE") -gt 1 ]]; then
+        LC_ALL=C tail -n +2 "$MOLE_UNINSTALL_LINUX_CACHE_FILE" > "$out_file"
+        register_temp_file "$out_file"
+        echo "$out_file"
+        return 0
+    fi
+
+    enumerate_linux_index "$out_file" || {
+        rm -f "$out_file"
+        return 1
+    }
+
+    # Persist fingerprint + index atomically under the shared metadata lock.
+    local snapshot_file
+    snapshot_file=$(mktemp "${TMPDIR:-/tmp}/mole.linux-scan.XXXXXX")
+    {
+        printf '%s\n' "$current_fingerprint"
+        cat "$out_file"
+    } > "$snapshot_file"
+    if uninstall_acquire_metadata_lock "$MOLE_UNINSTALL_META_CACHE_LOCK"; then
+        uninstall_persist_cache_file "$snapshot_file" "$MOLE_UNINSTALL_LINUX_CACHE_FILE"
+        uninstall_release_metadata_lock "$MOLE_UNINSTALL_META_CACHE_LOCK"
+    else
+        rm -f "$snapshot_file"
+    fi
+
+    register_temp_file "$out_file"
+    echo "$out_file"
+}
+
 # Scan applications and collect information. Orchestrates the four
 # phases (discover, partition, resolve, finalize) and owns the shared
 # temp files, spinner subprocess, INT trap, and metadata cache lock.
 scan_applications() {
+    # Linux routes through the backend enumeration; the macOS phases below
+    # are darwin-only and stay byte-equivalent in effect.
+    if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+        _linux_scan_applications
+        return $?
+    fi
+
     local temp_file scan_raw_file merged_file refresh_file cache_snapshot_file discovered_file cached_rows_file uncached_rows_file
     temp_file=$(create_temp_file)
     scan_raw_file="${temp_file}.scan"
@@ -1207,7 +1283,11 @@ load_applications() {
     selection_state=()
 
     while IFS='|' read -r epoch app_path app_name bundle_id size last_used size_kb; do
-        [[ ! -e "$app_path" ]] && continue
+        # Linux flatpak rows target ~/.var/app/<id> which may not exist yet;
+        # identity is re-verified before any destructive side effect.
+        if [[ "${MOLE_PLATFORM:-darwin}" != "linux" && ! -e "$app_path" ]]; then
+            continue
+        fi
 
         apps_data+=("$epoch|$app_path|$app_name|$bundle_id|$size|$last_used|${size_kb:-0}")
         selection_state+=(false)
@@ -1441,7 +1521,7 @@ uninstall_list_apps() {
         for app_data in "${apps_data[@]+"${apps_data[@]}"}"; do
             IFS='|' read -r _ app_path app_name bundle_id size _ _ <<< "$app_data"
             local cask=""
-            if is_homebrew_available; then
+            if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]] && is_homebrew_available; then
                 cask=$(get_brew_cask_name "$app_path" 2> /dev/null || true)
             fi
             local uninstall_name="${cask:-$app_name}"
@@ -1485,7 +1565,7 @@ uninstall_list_apps() {
     for app_data in "${apps_data[@]+"${apps_data[@]}"}"; do
         IFS='|' read -r _ app_path app_name bundle_id size _ _ <<< "$app_data"
         local cask=""
-        if is_homebrew_available; then
+        if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]] && is_homebrew_available; then
             cask=$(get_brew_cask_name "$app_path" 2> /dev/null || true)
         fi
         local uninstall_name="${cask:-$app_name}"

@@ -12,6 +12,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Load Steam launcher detection (identifies shortcut-only app bundles)
 [[ -f "$SCRIPT_DIR/lib/uninstall/steam.sh" ]] && source "$SCRIPT_DIR/lib/uninstall/steam.sh"
 
+# Linux batch executor (contract §5). The launchd / login-items / Homebrew
+# teardown below is macOS-only and stays untouched; on Linux this module owns
+# execution.
+if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+    # shellcheck source=lib/uninstall/linux_batch.sh
+    source "$SCRIPT_DIR/lib/uninstall/linux_batch.sh"
+fi
+
 # Batch uninstall with a single confirmation.
 
 is_uninstall_dry_run() {
@@ -59,7 +67,9 @@ decode_file_list() {
         fi
     fi
 
-    if [[ "$decoded" =~ $'\0' ]]; then
+    # bash >= 4 collapses $'\0' inside [[ =~ ]], turning the guard into an
+    # always-true empty regex; compare byte counts to detect NULs portably.
+    if [[ "$(printf '%s' "$decoded" | wc -c)" -ne "$(printf '%s' "$decoded" | LC_ALL=C tr -d '\000' | wc -c)" ]]; then
         log_warning "File list for $app_name contains null bytes, rejecting" >&2
         echo ""
         return 0 # Return success with empty string
@@ -97,7 +107,9 @@ decode_bundle_id_list() {
         fi
     fi
 
-    if [[ "$decoded" =~ $'\0' ]]; then
+    # bash >= 4 collapses $'\0' inside [[ =~ ]], turning the guard into an
+    # always-true empty regex; compare byte counts to detect NULs portably.
+    if [[ "$(printf '%s' "$decoded" | wc -c)" -ne "$(printf '%s' "$decoded" | LC_ALL=C tr -d '\000' | wc -c)" ]]; then
         log_warning "Helper id list for $app_name contains null bytes, rejecting" >&2
         echo ""
         return 0
@@ -825,7 +837,7 @@ _uninstall_live_sibling_record() {
     local info_identity=""
     if [[ $identity_rc -eq 0 ]]; then
         app_identity=$(run_with_timeout "$identity_timeout" "$STAT_BSD" \
-            -f%d:%i:%m "$app" 2> /dev/null) || identity_rc=$?
+            "${_MOLE_STAT_ID_MTIME_FLAG}" "$app" 2> /dev/null) || identity_rc=$?
     fi
     if [[ $identity_rc -eq 0 ]]; then
         identity_timeout=$(_mole_timeout_with_deadline \
@@ -833,7 +845,7 @@ _uninstall_live_sibling_record() {
     fi
     if [[ $identity_rc -eq 0 ]]; then
         info_identity=$(run_with_timeout "$identity_timeout" "$STAT_BSD" \
-            -f%d:%i:%m "$info" 2> /dev/null) || identity_rc=$?
+            "${_MOLE_STAT_ID_MTIME_FLAG}" "$info" 2> /dev/null) || identity_rc=$?
     fi
     [[ $identity_rc -eq 0 ]] || return "$identity_rc"
     [[ "$app_identity" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || return 2
@@ -1274,7 +1286,7 @@ _batch_selected_app_identity() {
     local identity=""
     local identity_rc=0
     identity=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
-        "$STAT_BSD" -f%d:%i:%m "$app_path" 2> /dev/null) || identity_rc=$?
+        "$STAT_BSD" "${_MOLE_STAT_ID_MTIME_FLAG}" "$app_path" 2> /dev/null) || identity_rc=$?
     [[ $identity_rc -eq 0 ]] || return "$identity_rc"
     [[ "$identity" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || return 1
     printf '%s\n' "$identity"
@@ -1291,7 +1303,7 @@ _batch_selected_app_info_identity() {
     local identity=""
     local identity_rc=0
     identity=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
-        "$STAT_BSD" -f%d:%i:%m "$info" 2> /dev/null) || identity_rc=$?
+        "$STAT_BSD" "${_MOLE_STAT_ID_MTIME_FLAG}" "$info" 2> /dev/null) || identity_rc=$?
     [[ $identity_rc -eq 0 ]] || return "$identity_rc"
     [[ "$identity" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || return 1
     printf '%s\n' "$identity"
@@ -2525,12 +2537,16 @@ _batch_render_summary() {
     print_summary_block "$title" "${summary_details[@]}"
     printf '\n'
 }
-
-# Batch uninstall with single confirmation. Orchestrates the four phases
-# (scan, preview/confirm, execute, summary) and manages the cross-phase
-# shared state, the SIGINT/SIGTERM trap, sudo keepalive, and the deferred
-# Dock / LaunchServices refresh.
 batch_uninstall_applications() {
+    # Linux execution path: no launchd / login-items / brew branches; identity
+    # re-verification and channel-specific removal live in linux_batch.sh.
+    if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
+        batch_uninstall_applications_linux
+        local _linux_rc=$?
+        total_size_cleaned=$((total_size_cleaned + LINUX_BATCH_SIZE_FREED_KB))
+        return "$_linux_rc"
+    fi
+
     local total_size_freed=0
 
     # shellcheck disable=SC2154
