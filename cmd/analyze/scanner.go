@@ -1,5 +1,3 @@
-//go:build darwin
-
 package main
 
 import (
@@ -350,7 +348,7 @@ scanChildren:
 			}
 
 			// ~/Library is scanned separately; reuse cache when possible.
-			if isHomeDir && child.Name() == "Library" {
+			if homeLibraryDirName() != "" && isHomeDir && child.Name() == homeLibraryDirName() {
 				processDir := func(name, path string) {
 					if ctx.Err() != nil {
 						return
@@ -538,9 +536,11 @@ scanChildren:
 		largeFiles[i] = heap.Pop(largeFilesHeap).(fileEntry)
 	}
 
-	// Use Spotlight for large files when it expands the list.
-	if useSpotlight {
-		spotlightFiles, _ := findLargeFilesWithSpotlight(ctx, root, spotlightMinFileSize)
+	// Use Spotlight for large files when it expands the list. The concurrent
+	// walker already produced the full large-file list on Linux, so only
+	// macOS pays for a second discovery pass here.
+	if useSpotlight && runtime.GOOS == "darwin" {
+		spotlightFiles, _ := findLargeFilesExtra(ctx, root, spotlightMinFileSize)
 		if err := ctx.Err(); err != nil {
 			return scanResult{}, err
 		}
@@ -974,7 +974,7 @@ func measureOverviewSize(path string) (int64, error) {
 	home := os.Getenv("HOME")
 	excludePath := ""
 	if home != "" && path == home {
-		excludePath = filepath.Join(home, "Library")
+		excludePath = homeLibraryPath(home)
 	}
 
 	if duSize, err := getDirectorySizeFromDuWithExcludeAndIgnores(context.Background(), path, excludePath, overviewIgnoreNamesForPath(path)); err == nil {
@@ -1027,10 +1027,7 @@ func getDirectorySizeFromDuWithExcludeAndIgnores(ctx context.Context, path strin
 		ctx, cancel := context.WithTimeout(ctx, duTimeout)
 		defer cancel()
 
-		args := []string{"-skPx"}
-		for _, ignoreName := range ignoreNames {
-			args = append(args, "-I", ignoreName)
-		}
+		args := append([]string{"-skPx"}, duIgnoreArgs(ignoreNames)...)
 		args = append(args, target)
 		cmd := exec.CommandContext(ctx, "du", args...)
 		var stdout, stderr bytes.Buffer
@@ -1270,5 +1267,5 @@ func getLastAccessTimeFromInfo(info fs.FileInfo) time.Time {
 	if !ok {
 		return time.Time{}
 	}
-	return time.Unix(stat.Atimespec.Sec, stat.Atimespec.Nsec)
+	return lastAccessTimeFromStat(stat)
 }

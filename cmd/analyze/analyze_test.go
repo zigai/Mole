@@ -1,5 +1,3 @@
-//go:build darwin
-
 package main
 
 import (
@@ -1516,6 +1514,7 @@ func TestScanPathConcurrentUsesChildCacheLargeFiles(t *testing.T) {
 }
 
 func TestScanPathConcurrentWarmsChildCachesWithoutRecursiveSpotlight(t *testing.T) {
+	skipIfNotDarwin(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -2193,6 +2192,7 @@ func TestManualRefreshBypassesNestedSubdirCache(t *testing.T) {
 }
 
 func TestCacheBypassSkipsHomeLibraryOverviewSnapshot(t *testing.T) {
+	skipIfNotDarwin(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	resetOverviewSnapshotForTest()
@@ -2869,6 +2869,7 @@ func TestMeasureOverviewSize(t *testing.T) {
 }
 
 func TestIsHandledByMoClean(t *testing.T) {
+	skipIfNotDarwin(t)
 	tests := []struct {
 		name string
 		path string
@@ -3305,6 +3306,7 @@ func TestCalculateDirSizeFastHighFanoutCompletes(t *testing.T) {
 }
 
 func TestSystemOverviewRootsDefaultsToRealSystemPaths(t *testing.T) {
+	skipIfNotDarwin(t)
 	roots := systemOverviewRoots()
 	if len(roots) != 2 {
 		t.Fatalf("expected 2 default system roots, got %d", len(roots))

@@ -25,23 +25,28 @@ var skipDiskMounts = map[string]bool{
 	"/System/Volumes/Hardware": true,
 	"/System/Volumes/Data":     true,
 	"/dev":                     true,
+	"/boot/efi":                true,
 }
 
 var skipDiskFSTypes = map[string]bool{
-	"afpfs":   true,
-	"autofs":  true,
-	"cifs":    true,
-	"devfs":   true,
-	"fuse":    true,
-	"fuseblk": true,
-	"fusefs":  true,
-	"macfuse": true,
-	"nfs":     true,
-	"osxfuse": true,
-	"procfs":  true,
-	"smbfs":   true,
-	"tmpfs":   true,
-	"webdav":  true,
+	"afpfs":    true,
+	"autofs":   true,
+	"cifs":     true,
+	"devfs":    true,
+	"erofs":    true,
+	"fuse":     true,
+	"fuseblk":  true,
+	"fusefs":   true,
+	"iso9660":  true,
+	"macfuse":  true,
+	"nfs":      true,
+	"osxfuse":  true,
+	"overlay":  true,
+	"procfs":   true,
+	"smbfs":    true,
+	"squashfs": true,
+	"tmpfs":    true,
+	"webdav":   true,
 }
 
 var (
@@ -542,14 +547,10 @@ func collectTrashSize() (uint64, bool) {
 }
 
 func scanTrashSize() (uint64, bool) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return 0, false
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var total uint64
-	trashPath := filepath.Join(home, ".Trash")
+	trashPath := userTrashDir()
 	_ = filepath.WalkDir(trashPath, func(_ string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return fs.SkipAll
@@ -568,4 +569,21 @@ func scanTrashSize() (uint64, bool) {
 		return nil
 	})
 	return total, ctx.Err() != nil
+}
+
+// userTrashDir returns the user's trash directory: $XDG_DATA_HOME/Trash/files
+// on Linux (freedesktop.org Trash spec), ~/.Trash on macOS.
+func userTrashDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	if runtime.GOOS == "linux" {
+		dataHome := os.Getenv("XDG_DATA_HOME")
+		if dataHome == "" {
+			dataHome = filepath.Join(home, ".local", "share")
+		}
+		return filepath.Join(dataHome, "Trash", "files")
+	}
+	return filepath.Join(home, ".Trash")
 }

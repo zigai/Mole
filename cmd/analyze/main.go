@@ -1,5 +1,3 @@
-//go:build darwin
-
 package main
 
 import (
@@ -7,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync/atomic"
 	"syscall"
@@ -138,17 +135,11 @@ func createOverviewEntriesWithInsights(insightEntries []dirEntry) []dirEntry {
 	home := os.Getenv("HOME")
 	entries := []dirEntry{}
 
-	// Separate Home and ~/Library to avoid double counting.
+	// Home first; platform-specific splits (e.g. macOS ~/Library) follow so
+	// their bytes are not double counted inside Home.
 	if home != "" {
 		entries = append(entries, dirEntry{Name: "Home", Path: home, IsDir: true, Size: -1})
-
-		userLibrary := filepath.Join(home, "Library")
-		if _, err := os.Stat(userLibrary); err == nil {
-			// Renamed from "App Library" to "User Library" so it parallels
-			// "System Library" (`/Library`) and is not confused with
-			// `/Applications`. Path unchanged.
-			entries = append(entries, dirEntry{Name: "User Library", Path: userLibrary, IsDir: true, Size: -1})
-		}
+		entries = append(entries, homeSplitEntries(home)...)
 	}
 
 	entries = append(entries, systemOverviewRoots()...)
@@ -157,13 +148,6 @@ func createOverviewEntriesWithInsights(insightEntries []dirEntry) []dirEntry {
 	entries = append(entries, insightEntries...)
 
 	return entries
-}
-
-func systemOverviewRoots() []dirEntry {
-	return []dirEntry{
-		{Name: "Applications", Path: "/Applications", IsDir: true, Size: -1},
-		{Name: "System Library", Path: "/Library", IsDir: true, Size: -1},
-	}
 }
 
 func sumKnownEntrySizes(entries []dirEntry) int64 {
@@ -200,19 +184,15 @@ func safeOpen(path string, reveal bool) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
 	defer cancel()
-	args := []string{path}
-	if reveal {
-		args = []string{"-R", path}
-	}
-	return exec.CommandContext(ctx, "open", args...).Run()
+	return openWithDefault(ctx, path, reveal)
 }
 
-// safePreview opens the file with the default macOS application.
+// safePreview opens the file with the default desktop application.
 func safePreview(path string) error {
 	if err := validatePath(path); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
 	defer cancel()
-	return exec.CommandContext(ctx, "open", path).Run()
+	return openWithDefault(ctx, path, false)
 }

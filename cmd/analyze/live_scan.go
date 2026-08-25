@@ -1,5 +1,3 @@
-//go:build darwin
-
 package main
 
 import (
@@ -187,7 +185,7 @@ func readLiveScanInitialEntries(root string, limiter *scanLimiter) ([]dirEntry, 
 			}
 
 			targetKind := liveScanTargetDirectory
-			if isHomeDir && child.Name() == "Library" {
+			if homeLibraryDirName() != "" && isHomeDir && child.Name() == homeLibraryDirName() {
 				targetKind = liveScanTargetHomeLibrary
 			} else if shouldFoldDirWithPath(child.Name(), fullPath) {
 				targetKind = liveScanTargetFoldedDirectory

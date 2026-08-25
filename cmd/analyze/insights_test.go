@@ -1,5 +1,3 @@
-//go:build darwin
-
 package main
 
 import (
@@ -35,6 +33,7 @@ func TestCreateInsightEntries(t *testing.T) {
 }
 
 func TestCreateInsightEntriesIncludesOrbStackData(t *testing.T) {
+	skipIfNotDarwin(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 

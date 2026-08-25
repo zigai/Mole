@@ -1,5 +1,3 @@
-//go:build darwin
-
 package main
 
 import (
@@ -72,14 +70,6 @@ func isHandledByMoClean(path string) bool {
 	}
 
 	return false
-}
-
-var moCleanHandledPathFragments = []string{
-	"/Library/Caches/",
-	"/Library/Logs/",
-	"/Library/Saved Application State/",
-	"/.Trash/",
-	"/Library/DiagnosticReports/",
 }
 
 // Project dependency and build directories.

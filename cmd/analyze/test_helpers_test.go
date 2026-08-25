@@ -1,15 +1,23 @@
-//go:build darwin
-
 package main
 
 import (
 	"context"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+// skipIfNotDarwin gates tests whose fixtures are macOS paths or behaviors
+// (Spotlight, Finder, ~/Library splits) with no Linux equivalent to assert.
+func skipIfNotDarwin(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Skipf("skipping macOS-specific fixture on %s", runtime.GOOS)
+	}
+}
 
 func skipIfFinderUnavailable(t *testing.T) {
 	t.Helper()
