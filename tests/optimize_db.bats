@@ -11,6 +11,14 @@ setup_file() {
 	export HOME
 }
 
+setup() {
+	# Every case drives macOS-only catalog actions (notification_cleanup,
+	# coreduet_cleanup, sqlite_vacuum), which Linux registrations replace.
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only optimize tasks"
+	fi
+}
+
 teardown_file() {
 	if [[ "$HOME" == "${BATS_TEST_DIRNAME}/tmp-"* ]]; then
 		rm -rf "$HOME"

@@ -32,6 +32,11 @@ setup() {
     export TERM="dumb"
     rm -rf "${HOME:?}"/*
     mkdir -p "$HOME"
+    # Immunity against cross-suite leakage: scripts/test.sh sources
+    # lib/core/file_ops.sh into its own shell, which exports MOLE_PLATFORM
+    # (and friends) into every bats worker. These payloads exercise the
+    # macOS-default flows and must not see an inherited linux preset.
+    unset MOLE_PLATFORM MOLE_DISTRO_ID MOLE_OS_RELEASE_FILE MOLE_LOG_ROTATED || true
 }
 
 create_app_artifacts() {
@@ -95,6 +100,9 @@ EOF
 }
 
 @test "find_app_files discovers nested XPC helper preferences from selected app" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS app-bundle leftover flow"
+    fi
     app="$HOME/Applications/SoundSource.app"
     mkdir -p "$app/Contents/Frameworks/RemoteAU.framework/Versions/A/XPCServices/RemoteAUHost.xpc/Contents"
     mkdir -p "$app/Contents/Frameworks/Sparkle.framework/Versions/A/XPCServices/DownloaderService.xpc/Contents"
@@ -176,6 +184,9 @@ EOF
 }
 
 @test "find_app_system_files discovers bundle-id-prefixed LaunchDaemons" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS launchd teardown flow"
+    fi
     fakebin="$HOME/fakebin"
     mkdir -p "$fakebin"
 
@@ -351,6 +362,9 @@ EOF
 }
 
 @test "batch_uninstall_applications removes selected app data" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS batch uninstall flow"
+    fi
     create_app_artifacts
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
@@ -395,6 +409,9 @@ EOF
 }
 
 @test "batch uninstall routes a root-owned app through unprivileged Trash when its parent is writable (#1331)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS Trash routing flow"
+    fi
     mkdir -p "$HOME/Applications/RootOwned.app"
     local trace="$HOME/root-owned-trash.log"
 
@@ -438,6 +455,9 @@ EOF
 }
 
 @test "batch uninstall rejects privileged permanent removal below a mutable parent before side effects (#1299)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch uninstall executor)"
+    fi
     mkdir -p "$HOME/Applications/RootOwned.app"
     mkdir -p "$HOME/Library/Application Support/RootOwned"
 
@@ -481,6 +501,9 @@ EOF
 }
 
 @test "a foreign Caskroom-like symlink never selects a Homebrew cask (#1299)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch uninstall executor)"
+    fi
     local fake_target="$HOME/foreign/Caskroom/real-cask/1.0/Fake.app"
     mkdir -p "$HOME/Applications" "$fake_target"
     ln -s "$fake_target" "$HOME/Applications/Fake.app"
@@ -602,6 +625,9 @@ EOF
 }
 
 @test "live same-bundle scan finds a sibling that appeared after preview" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (plutil/pkgutil .app discovery)"
+    fi
     local app_root="$HOME/live-apps"
     mkdir -p "$app_root/Selected.app/Contents" \
         "$app_root/Setapp/NewSibling.app/Contents"
@@ -650,6 +676,9 @@ EOF
 }
 
 @test "live same-bundle scan accepts dot-app text in a volume ancestor" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (plutil/pkgutil .app discovery)"
+    fi
     local app_root="$HOME/Backup.app-data/Applications"
     mkdir -p "$app_root/Survivor.app/Contents" "$HOME/Selected.app"
 
@@ -681,6 +710,9 @@ EOF
 }
 
 @test "live same-bundle scan finds an app at a mounted volume root" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (plutil/pkgutil .app discovery)"
+    fi
     local volumes_root="$HOME/Volumes"
     local survivor="$volumes_root/Example/Survivor.app"
     mkdir -p "$survivor/Contents" "$HOME/Selected.app"
@@ -718,6 +750,9 @@ EOF
 }
 
 @test "live same-bundle scan covers exact package receipt apps" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (plutil/pkgutil .app discovery)"
+    fi
     local app_root="$HOME/pkg-root"
     mkdir -p "$app_root/one/two/three/four/Deep.app/Contents" "$HOME/Selected.app"
 
@@ -751,6 +786,9 @@ EOF
 }
 
 @test "strict package receipt discovery rejects partial output" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (plutil/pkgutil .app discovery)"
+    fi
     run env HOME="$HOME/pkg-partial" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -788,6 +826,9 @@ EOF
 }
 
 @test "non-strict receipt discovery bounds each pkgutil file listing" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (plutil/pkgutil .app discovery)"
+    fi
 	local mock_bin="$HOME/mock-pkgutil-bin"
 	mkdir -p "$mock_bin"
 	cat > "$mock_bin/pkgutil" <<'MOCK'
@@ -860,6 +901,9 @@ EOF
 }
 
 @test "batch execution rejects a changed same-bundle app set before teardown" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch executor; identity probe uses BSD-only stat -f on linux)"
+    fi
     run env HOME="$HOME/live-set-race" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -916,6 +960,9 @@ EOF
 }
 
 @test "batch execution rejects a selected Info.plist changed after preview" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch executor; identity probe uses BSD-only stat -f on linux)"
+    fi
     run env HOME="$HOME/selected-info-race" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -979,6 +1026,9 @@ EOF
 }
 
 @test "batch scan narrows a live same-bundle plan to the selected app bundle" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (plutil/pkgutil .app discovery)"
+    fi
     run env HOME="$HOME/live-bundle-only" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1042,6 +1092,9 @@ EOF
 }
 
 @test "batch execution protects an earlier app when a later same-bundle selection changes" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch executor; identity probe uses BSD-only stat -f on linux)"
+    fi
     run env HOME="$HOME/multi-selected-race" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1132,6 +1185,9 @@ EOF
 }
 
 @test "batch execution removes stable same-bundle multi-selections" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch executor; identity probe uses BSD-only stat -f on linux)"
+    fi
     run env HOME="$HOME/multi-selected-stable" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1265,6 +1321,9 @@ EOF
 }
 
 @test "batch_uninstall_applications keeps shared bundle-id leftovers when a sibling install survives" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch uninstall executor)"
+    fi
     # Xcode.app and Xcode-beta.app both use com.apple.dt.Xcode. Uninstalling
     # only the beta must not delete bundle-id-keyed files still owned by the
     # surviving stable install.
@@ -1316,6 +1375,9 @@ EOF
 }
 
 @test "batch_uninstall_applications keeps name-keyed leftovers when sibling installs share a display name" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch uninstall executor)"
+    fi
     # On unindexed volumes mdls returns (null) and CFBundleName collapses both
     # installs to one display name ("Xcode" for Xcode-beta.app). Discovery must
     # fall back to the .app basename; when even that collides with the
@@ -1470,6 +1532,9 @@ EOF
 }
 
 @test "batch_uninstall_applications blocks official-uninstaller apps" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch uninstall executor)"
+    fi
     mkdir -p "$HOME/Applications/Falcon.app"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
@@ -1497,6 +1562,9 @@ EOF
 }
 
 @test "batch_uninstall_applications keeps system remnants review-only" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch uninstall executor)"
+    fi
     mkdir -p "$HOME/Applications/ReviewOnly.app" "$HOME/system"
     touch "$HOME/system/com.example.review.helper"
 
@@ -1555,6 +1623,9 @@ EOF
 }
 
 @test "batch_uninstall_applications dry-run does not report expected leftovers as failures" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch uninstall executor)"
+    fi
     create_app_artifacts
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
@@ -1611,6 +1682,9 @@ EOF
 }
 
 @test "force_kill_app skips the kill ladder when Quit succeeds" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (osascript/plutil kill ladder)"
+    fi
     # run_with_timeout invokes its argv via gtimeout/timeout, which exec the
     # real binary and bypass bash functions, so we shadow osascript via a
     # real script on PATH and read the trace it writes.
@@ -1842,6 +1916,9 @@ EOF
 }
 
 @test "force_kill_app refuses to operate on system process names" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (osascript/plutil kill ladder)"
+    fi
     # Defensive guard: a third-party .app could set CFBundleExecutable to a
     # system process name (Finder, Dock, loginwindow, etc.). Even though the
     # uninstall selection layer filters out protected bundle IDs, force_kill_app
@@ -1913,6 +1990,9 @@ EOF
 }
 
 @test "batch_uninstall_applications proceeds with deletion when force_kill_app fails" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch uninstall executor)"
+    fi
     # Reproduces the issue where uninstalling a still-running app (e.g. Mole.app
     # with a watchdog or XPC helper that ignores SIGKILL) used to abort with
     # "still running" and leave the bundle on disk. macOS allows deleting a
@@ -2015,6 +2095,9 @@ EOF
 }
 
 @test "batch_uninstall_applications preview shows full related file list" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch uninstall executor)"
+    fi
     mkdir -p "$HOME/Applications/TestApp.app"
     mkdir -p "$HOME/Library/Application Support/TestApp"
     mkdir -p "$HOME/Library/Caches/TestApp"
@@ -2157,6 +2240,9 @@ EOF
 }
 
 @test "cached uninstall metadata is rejected when the current bundle is protected" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app metadata needs plutil)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2185,6 +2271,9 @@ EOF
 }
 
 @test "cached uninstall metadata is rejected when the app is background-only" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app metadata needs plutil)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2216,6 +2305,9 @@ EOF
 }
 
 @test "OneDrive Mac App Store bundle is eligible even when marked background-only" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app metadata needs plutil)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2248,6 +2340,9 @@ EOF
 }
 
 @test "eligible uninstall metadata uses the current bundle id over stale cache" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app metadata needs plutil)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2291,6 +2386,9 @@ EOF
 }
 
 @test "decode_file_list validates base64 encoding" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "decode_* null-byte regex misfires on bash >= 4 (lib port defect)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2384,6 +2482,9 @@ EOF
 }
 
 @test "decode_bundle_id_list preserves login item helper ids" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "decode_* null-byte regex misfires on bash >= 4 (lib port defect)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2481,6 +2582,9 @@ EOF
 }
 
 @test "decode_file_list handles both BSD and GNU base64 formats" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "decode_* null-byte regex misfires on bash >= 4 (lib port defect)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2592,9 +2696,14 @@ EOF
     [ ! -f "$HOME/.local/bin/mo" ] || return 1
     [ ! -d "$HOME/.config/mole" ] || return 1
     [ ! -d "$HOME/.cache/mole" ] || return 1
-    [ ! -d "$HOME/Library/Logs/mole" ] || return 1
-    # Config is user-authored state and must survive in the Trash (#1346).
-    [ -f "$HOME/.Trash/mole-config/whitelist" ] || return 1
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        [ ! -d "$HOME/Library/Logs/mole" ] || return 1
+        # Config is user-authored state and must survive in the Trash (#1346).
+        [ -f "$HOME/.Trash/mole-config/whitelist" ] || return 1
+    else
+        # Linux removes the XDG state dir; the config dir is gio-trashed.
+        [ ! -d "${XDG_STATE_HOME:-$HOME/.local/state}/mole" ] || return 1
+    fi
 }
 
 @test "remove_mole dry-run keeps manual binaries and caches" {
@@ -3207,6 +3316,9 @@ INNER
 }
 
 @test "inventory fingerprint changes when only Info.plist changes" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (Info.plist mtime fingerprint; linux fingerprints package lists)"
+    fi
     run env HOME="$HOME/inventory-plist-mtime" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -3233,6 +3345,9 @@ INNER
 }
 
 @test "batch scan refreshes selected app identity before leftover discovery" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch scan; identity probe uses BSD-only stat -f on linux)"
+    fi
     run env HOME="$HOME/batch-refresh-identity" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -3282,6 +3397,9 @@ INNER
 }
 
 @test "batch scan stops before discovery when app sizing is interrupted" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch scan; identity probe uses BSD-only stat -f on linux)"
+    fi
     run env HOME="$HOME/batch-size-interrupt" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
@@ -3325,6 +3443,9 @@ INNER
 }
 
 @test "batch uninstall stops before discovery and teardown when app sizing times out" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch scan; identity probe uses BSD-only stat -f on linux)"
+    fi
     run env HOME="$HOME/batch-size-timeout" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
@@ -3372,6 +3493,9 @@ INNER
 }
 
 @test "batch scan keeps the app plan when related-file sizing times out" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch scan; identity probe uses BSD-only stat -f on linux)"
+    fi
     # Related size is display-only (#1383). A stalled du on leftovers must not
     # abort the batch; the leftover paths stay in the plan with size 0.
     run env HOME="$HOME/batch-related-size-timeout" PROJECT_ROOT="$PROJECT_ROOT" \
@@ -3428,6 +3552,9 @@ INNER
 }
 
 @test "batch scan keeps the app when leftover discovery times out after receipt work (#1383)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (macOS batch scan + pkgutil receipts)"
+    fi
     # Machine-wide receipt walks can exhaust the shared deadline; leftover
     # discovery then returns 124. That must narrow to the selected app, not
     # abort with "nothing was removed".
@@ -3694,6 +3821,9 @@ INNER
 }
 
 @test "uninstall --list flags brew-managed apps with cask uninstall_name" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (Homebrew cask inventory)"
+    fi
     local apps_cache
     apps_cache="$(mktemp "${BATS_TEST_TMPDIR:-$BATS_RUN_TMPDIR:-$HOME}/tmp-list-brew.XXXXXX")"
     cat > "$apps_cache" << 'CACHE'
@@ -3766,6 +3896,9 @@ EOF
 }
 
 @test "_uninstall_match_loaded_background_items checks helper ids under the sibling guard" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "decode_* null-byte regex misfires on bash >= 4 (lib port defect)"
+    fi
     # Sibling guard demotes bundle_id to "unknown" while helper ids stay
     # valid; a loaded helper job must still be reported.
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \

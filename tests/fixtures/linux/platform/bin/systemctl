@@ -1,0 +1,3 @@
+#!/bin/bash
+# Stub systemctl for platform tests.
+exit 0

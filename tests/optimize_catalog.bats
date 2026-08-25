@@ -5,6 +5,14 @@ setup_file() {
     export PROJECT_ROOT
 }
 
+setup() {
+    # Immunity against cross-suite leakage: scripts/test.sh sources
+    # lib/core/file_ops.sh into its own shell, which exports MOLE_PLATFORM
+    # (and friends) into every bats worker. Unpinned payloads rely on the
+    # unset default resolving to the macOS catalog.
+    unset MOLE_PLATFORM MOLE_DISTRO_ID MOLE_OS_RELEASE_FILE MOLE_LOG_ROTATED || true
+}
+
 @test "optimize exposes no manual memory purge task (#1309)" {
 	run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -113,14 +121,23 @@ EOF
 }
 
 @test "health JSON preserves the exact optimization contract" {
-    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    # The hashed contract is the macOS task list; Linux registrations are
+    # covered by the linux_misc_optimize suite. shasum is macOS-only.
+    run env PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=darwin /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
+digest() {
+    if command -v shasum > /dev/null 2>&1; then
+        shasum -a 256
+    else
+        sha256sum
+    fi
+}
 source "$PROJECT_ROOT/lib/check/health_json.sh"
 
 contract_hash=$(
     generate_health_json |
         sed -n '/  "optimizations": \[/,$p' |
-        shasum -a 256 |
+        digest |
         awk '{print $1}'
 )
 expected_hash="8896e6dedcab9ab76accb1ea7502c59b711da912473923b089451222ddc61c2c"
@@ -134,11 +151,19 @@ EOF
 }
 
 @test "optimize whitelist preserves every public task label and action" {
-    run env HOME="$BATS_TEST_TMPDIR/home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    # The hashed contract is the macOS whitelist; see health JSON above.
+    run env HOME="$BATS_TEST_TMPDIR/home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=darwin /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
+digest() {
+    if command -v shasum > /dev/null 2>&1; then
+        shasum -a 256
+    else
+        sha256sum
+    fi
+}
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
 
-contract_hash=$(get_optimize_whitelist_items | shasum -a 256 | awk '{print $1}')
+contract_hash=$(get_optimize_whitelist_items | digest | awk '{print $1}')
 expected_hash="04376c036db32e504cac07b054532446465c2fd83a19c0e05a7710fa87f92078"
 if [[ "$contract_hash" != "$expected_hash" ]]; then
     echo "optimize whitelist contract hash: expected $expected_hash, got $contract_hash"
@@ -148,12 +173,11 @@ EOF
 
     [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
 }
-
 @test "optimize catalog rejects duplicate identities and unsafe tasks" {
     run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
-if /bin/bash --noprofile --norc < <(
+if MOLE_PLATFORM=darwin /bin/bash --noprofile --norc < <(
     awk '!changed && /opt_cache_refresh/ {sub(/opt_cache_refresh/, "opt_system_maintenance"); changed=1} {print}' \
         "$PROJECT_ROOT/lib/optimize/catalog.sh"
 ); then
@@ -161,7 +185,7 @@ if /bin/bash --noprofile --norc < <(
     exit 1
 fi
 
-if /bin/bash --noprofile --norc < <(
+if MOLE_PLATFORM=linux /bin/bash --noprofile --norc < <(
     awk '!changed && / true$/ {sub(/ true$/, " false"); changed=1} {print}' \
         "$PROJECT_ROOT/lib/optimize/catalog.sh"
 ); then
@@ -172,7 +196,7 @@ EOF
 
     [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
     [[ "$output" == *"Duplicate optimize task handler: opt_system_maintenance"* ]] || return 1
-    [[ "$output" == *"Optimize task is not safe for automatic execution: system_maintenance"* ]] || return 1
+    [[ "$output" == *"Optimize task is not safe for automatic execution: pkg_cache_trim"* ]] || return 1
 }
 
 @test "optimize catalog resolves handlers by exact action id" {
@@ -193,9 +217,8 @@ EOF
 
     [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
 }
-
 @test "optimization task module implements every catalog handler" {
-    run env HOME="$BATS_TEST_TMPDIR/home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$BATS_TEST_TMPDIR/home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=darwin /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"

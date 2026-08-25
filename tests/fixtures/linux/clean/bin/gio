@@ -1,0 +1,4 @@
+#!/bin/bash
+# Fake gio for tests: records the invocation, exits successfully.
+printf 'gio %s\n' "$*" >> "${MOLE_FAKE_TRACE:?MOLE_FAKE_TRACE not set}"
+exit 0

@@ -15,6 +15,9 @@ teardown_file() {
 }
 
 @test "system maintenance reports a failed Spotlight probe" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (mdutil/Spotlight maintenance)"
+	fi
 	run env HOME="$TEST_HOME/system" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -35,6 +38,9 @@ EOF
 }
 
 @test "Spotlight optimization reports a failed status probe" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (Spotlight index optimization)"
+	fi
 	run env HOME="$TEST_HOME/spotlight" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -50,6 +56,9 @@ EOF
 }
 
 @test "quarantine cleanup reports a failed row-count probe" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (Gatekeeper quarantine database)"
+	fi
 	run env HOME="$TEST_HOME/quarantine" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -70,6 +79,9 @@ EOF
 }
 
 @test "login item audit reports a failed snapshot" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (login items audit)"
+	fi
 	run env HOME="$TEST_HOME/login" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -86,6 +98,9 @@ EOF
 }
 
 @test "notification cleanup reports a failed size probe" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (Notification Center database)"
+	fi
 	run env HOME="$TEST_HOME/notification" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -105,6 +120,9 @@ EOF
 }
 
 @test "CoreDuet cleanup reports a failed size probe" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (CoreDuet Knowledge database)"
+	fi
 	run env HOME="$TEST_HOME/coreduet-size" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -123,6 +141,9 @@ EOF
 }
 
 @test "sudo-dependent maintenance is skipped when admin access is denied" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (mdutil/mDNSResponder maintenance)"
+	fi
 	run env HOME="$TEST_HOME/admin" PROJECT_ROOT="$PROJECT_ROOT" MOLE_OPTIMIZE_SUDO_AVAILABLE=false /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -141,6 +162,9 @@ EOF
 }
 
 @test "Spotlight optimization reports failed speed probes" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (Spotlight speed probes)"
+	fi
 	run env HOME="$TEST_HOME/spotlight-speed" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -177,6 +201,9 @@ EOF
 }
 
 @test "saved state cleanup reports a failed discovery scan" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (Saved Application State)"
+	fi
 	run env HOME="$TEST_HOME/saved-scan" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -197,6 +224,9 @@ EOF
 }
 
 @test "shared file list repair reports a failed discovery scan" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (shared file list databases)"
+	fi
 	run env HOME="$TEST_HOME/shared-scan" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -239,6 +269,9 @@ EOF
 }
 
 @test "network probe timeout never authorizes maintenance" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (route/dscacheutil/scutil probes)"
+	fi
 	run env HOME="$TEST_HOME/network-timeout" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -259,6 +292,9 @@ EOF
 }
 
 @test "network probes preserve the caller errexit mode" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow (scutil VPN probes)"
+	fi
 	run env HOME="$TEST_HOME/vpn-errexit" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"

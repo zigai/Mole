@@ -23,7 +23,12 @@ teardown_file() {
 	applied_count="${applied_count% optimizations}"
 	[[ "$output" != *"Would apply 23 optimizations"* ]] || return 1
 	[[ "$output" =~ [0-9]+\ unchanged ]] || return 1
-	[[ "$output" =~ [0-9]+\ skipped ]] || return 1
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		[[ "$output" =~ [0-9]+\ skipped ]] || return 1
+	else
+		# Linux catalog reports missing distro capabilities as unavailable.
+		[[ "$output" =~ ([0-9]+\ unavailable|[0-9]+\ skipped) ]] || return 1
+	fi
 	[[ "$output" != *"System fully optimized"* ]] || return 1
 
 	run env HOME="$TEST_HOME" "$PROJECT_ROOT/mole" history --json
@@ -33,6 +38,10 @@ teardown_file() {
 }
 
 @test "optimize failure reaches terminal exit and history contracts" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	local config_dir="$TEST_HOME/.config/mole"
 	local stub_dir="$TEST_HOME/bin"
 	mkdir -p "$config_dir" "$stub_dir"

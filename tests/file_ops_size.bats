@@ -183,6 +183,9 @@ EOF
 }
 
 @test "get_path_size_kb uses physical metadata for app bundles" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "mdls metadata exists only on macOS"
+    fi
     mkdir -p "$SANDBOX/Sized.app"
 
     run env PROJECT_ROOT="$PROJECT_ROOT" SANDBOX="$SANDBOX" \

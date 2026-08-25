@@ -1,0 +1,3 @@
+#!/bin/bash
+# Stub paru AUR helper for platform tests.
+exit 0

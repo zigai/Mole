@@ -2257,7 +2257,9 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"npm"* ]] || return 1
     [[ "$output" == *"mise"* ]] || return 1
-    [[ "$output" == *"brew"* ]]
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		[[ "$output" == *"brew"* ]]
+	fi
 }
 
 @test "clean_dev_ruby cleans rbenv, gem, and bundler caches" {
@@ -2960,6 +2962,10 @@ PLIST
 }
 
 @test "codex staging removes a superseded staged build regardless of age (#1359)" {
+	# Sparkle staging, PlistBuddy metadata and mdfind are macOS-only.
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
 	rm -rf "$staging_root"
 	mkdir -p "$staging_root/superseded/Codex.app/Contents" "$staging_root/pending/Codex.app/Contents"
@@ -2991,6 +2997,10 @@ EOF
 }
 
 @test "codex staging removes an equal staged build and keeps invalid metadata on the age rule" {
+	# Sparkle staging, PlistBuddy metadata and mdfind are macOS-only.
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
 	rm -rf "$staging_root"
 	mkdir -p "$staging_root/equal/Codex.app/Contents" \
@@ -3116,6 +3126,10 @@ EOF
 }
 
 @test "codex resolution treats a failed mdfind as unanswered, not as no-other-copies" {
+	# mdfind and PlistBuddy are macOS-only.
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	# A timed-out or failed mdfind may be hiding an unindexed extra copy
 	# whose pending update is the staged build under judgment. Resolution
 	# must fail (age rule), even when a fixed-path copy reads cleanly; a
@@ -3149,6 +3163,10 @@ EOF
 }
 
 @test "codex supersession boundary re-verifies the installed set before deleting" {
+	# mdfind and PlistBuddy are macOS-only.
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	# The scan snapshot is not enough: a copy installed or swapped after
 	# the scan (an older one whose pending update is exactly this staged
 	# build) must void the supersession at the deletion boundary.

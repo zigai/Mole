@@ -32,6 +32,15 @@ setup() {
     mkdir -p "$HOME"
 }
 
+# Log root differs per platform since the Linux port (XDG state dir).
+_mole_test_log_root() {
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		printf '%s\n' "$(_mole_test_log_root)"
+	else
+		printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/mole"
+	fi
+}
+
 @test "mo_spinner_chars returns default sequence" {
     result="$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; mo_spinner_chars")"
     [ "$result" = "|/-\\" ]
@@ -188,7 +197,7 @@ EOF
     stdout_output="$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; log_info '$message'")"
     [[ "$stdout_output" == *"$message"* ]] || return 1
 
-    local log_file="$HOME/Library/Logs/mole/mole.log"
+    local log_file="$(_mole_test_log_root)/mole.log"
     [[ -f "$log_file" ]] || return 1
     grep -q "INFO: $message" "$log_file"
 }
@@ -202,7 +211,7 @@ EOF
     [[ -s "$stderr_file" ]] || return 1
     grep -q "$message" "$stderr_file"
 
-    local log_file="$HOME/Library/Logs/mole/mole.log"
+    local log_file="$(_mole_test_log_root)/mole.log"
     [[ -f "$log_file" ]] || return 1
     grep -q "ERROR: $message" "$log_file"
 }
@@ -211,12 +220,12 @@ EOF
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
-rm -rf "$HOME/Library/Logs/mole"
+rm -rf "$(_mole_test_log_root)"
 log_operation "clean" "REMOVED" "/tmp/example" "1KB"
 EOF
     [ "$status" -eq 0 ]
 
-    local oplog="$HOME/Library/Logs/mole/operations.log"
+    local oplog="$(_mole_test_log_root)/operations.log"
     [[ -f "$oplog" ]] || return 1
     grep -Fq "[clean] REMOVED /tmp/example (1KB)" "$oplog"
 }
@@ -224,7 +233,7 @@ EOF
 @test "should_protect_path protects Mole runtime logs" {
     result="$(
         HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc -c \
-            'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$HOME/Library/Logs/mole/operations.log" && echo protected || echo not-protected'
+            'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$(mole_state_dir)/operations.log" && echo protected || echo not-protected'
     )"
     [ "$result" = "protected" ]
 }
@@ -291,7 +300,7 @@ EOF
 }
 
 @test "rotate_log_once only checks log size once per session" {
-    local log_file="$HOME/Library/Logs/mole/mole.log"
+    local log_file="$(_mole_test_log_root)/mole.log"
     mkdir -p "$(dirname "$log_file")"
     if command -v mkfile > /dev/null 2>&1; then
         mkfile -n 1100k "$log_file"

@@ -54,6 +54,13 @@ setup() {
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "$line" ]] && continue
 
+        # Uppercase aliases (/SYSTEM, /DEV, ...) rely on APFS case-insensitive
+        # inode identity: on a case-sensitive Linux host they name no existing
+        # file, so the deny-only policy accepts them by design. They stay
+        # fully validated when this suite runs on Darwin.
+        if [[ "$(uname -s)" != "Darwin" && "$line" =~ ^/[A-Z/_]+$ ]]; then
+            continue
+        fi
         run /bin/bash --noprofile --norc -s -- "$line" <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -104,7 +111,13 @@ EOF
     # accepted literally too, and the symlinked form must stay consistent with
     # that (the guard is deny-only, it never invents a stricter policy).
     local root
-    for root in /System /usr /bin /etc; do
+    local -a critical_roots=(/System /usr /bin /etc)
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        # /System does not exist on Linux, so a link pointing there dangles
+        # and cannot resolve; exercise the Linux-only critical roots instead.
+        critical_roots=(/proc /sys /usr /bin /etc)
+    fi
+    for root in "${critical_roots[@]}"; do
         local link="$sandbox/link-${root//\//_}"
         ln -s "$root" "$link"
         # Victim sits directly under the redirected dir, so its parent (the

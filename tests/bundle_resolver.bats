@@ -11,6 +11,9 @@ setup_file() {
 }
 
 setup() {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "exercises macOS-only Spotlight/SMJobBless internals"
+    fi
     FAKE_HOME="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-bundle-home.XXXXXX")"
     export FAKE_HOME
     # Safety: refuse to operate if mktemp failed.

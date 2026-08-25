@@ -114,6 +114,9 @@ EOF
 
 @test "release workflow keeps the Homebrew Core PR open (#1209)" {
     local workflow="$PROJECT_ROOT/.github/workflows/release.yml"
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
 
     run grep -F "Have you followed the [guidelines for contributing]" "$workflow"
     [ "$status" -eq 0 ]
@@ -204,7 +207,7 @@ EOF
     run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 eval "$(sed -n '/^source_archive_url()/,/^}/p' "$PROJECT_ROOT/install.sh")"
-[[ "$(source_archive_url dev "")" == "https://github.com/tw93/mole/archive/refs/heads/dev.tar.gz" ]]
+[[ "$(source_archive_url dev "")" == "https://github.com/zigai/Mole/archive/refs/heads/dev.tar.gz" ]]
 EOF
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     run /bin/bash -c "grep -q 'MOLE_VERSION=\"dev\"' '$PROJECT_ROOT/install.sh'"
@@ -212,6 +215,9 @@ EOF
 }
 
 @test "release workflow keeps Homebrew distribution on official core only" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run grep -q 'update-homebrew-core:' "$PROJECT_ROOT/.github/workflows/release.yml"
     [ "$status" -eq 0 ]
 

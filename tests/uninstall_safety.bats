@@ -158,6 +158,9 @@ EOF
 }
 
 @test "login item helper discovery reads embedded helper bundle ids" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	app="$HOME/Applications/Carrier.app"
 	helper="$app/Contents/Library/LoginItems/Carrier Helper.app/Contents"
 	mkdir -p "$helper"
@@ -365,6 +368,9 @@ EOF
 }
 
 @test "ByHost cleanup routes through user-mode mole_delete (no sudo prompt)" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	mkdir -p "$HOME/Library/Preferences/ByHost"
 	touch "$HOME/Library/Preferences/ByHost/com.example.TestApp.ABC123.plist"
 	mkdir -p "$HOME/Applications/TestApp.app"
@@ -528,6 +534,9 @@ EOF
 }
 
 @test "wrapped iOS bundles and id-less bundles do not make the sibling scan unknown (#1339)" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	# Two bundle shapes that are ordinary installs, not mysteries: an iOS app
 	# on Apple Silicon keeps its plist under Wrapper/<name>.app, and vendor
 	# uninstallers ship a plist with no CFBundleIdentifier at all. Both read as

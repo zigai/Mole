@@ -108,9 +108,11 @@ teardown() {
     # a symlinked ANCESTOR used to slip through: the policy path looked like an
     # ordinary cache dir while rm followed the link into the real tree.
     local fake_caches="$TEST_DIR/redirected-Caches"
-    ln -s /System "$fake_caches"
+    # Redirect through a critical root that exists on both platforms
+    # (/usr/lib ships everywhere; /System only exists on macOS).
+    ln -s /usr "$fake_caches"
 
-    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$fake_caches/Library/Caches/victim'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$fake_caches/lib/victim'"
     [ "$status" -eq 1 ]
     [[ "$output" == *"resolves into a critical system path"* ]] || return 1
 }
@@ -132,15 +134,40 @@ teardown() {
     mkdir -p "$TEST_DIR/real/Caches"
     : > "$TEST_DIR/real/Caches/cache.db"
 
-    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/real/Caches/cache.db'"
+    # Give the SQLite live-handle gate a conclusive idle answer so the
+    # ancestor guard is what decides, even on hosts where lsof is absent.
+    run env PROJECT_ROOT="$PROJECT_ROOT" target="$TEST_DIR/real/Caches/cache.db" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
+validate_path_for_deletion "$target"
+EOF
+
     [ "$status" -eq 0 ]
 }
 
 @test "validate_path_for_deletion accepts valid path" {
-    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/valid'"
+    # Same conclusive-idle lsof answer as above: acceptance here must not
+    # depend on the host having a working lsof install.
+    run env PROJECT_ROOT="$PROJECT_ROOT" target="$TEST_DIR/valid" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
+_mole_user_cache_owner_process_state() { return 1; }
+validate_path_for_deletion "$target"
+EOF
     [ "$status" -eq 0 ]
 
-    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$HOME/Library/Caches/com.example.app/cache.db'"
+    run env PROJECT_ROOT="$PROJECT_ROOT" target="$HOME/Library/Caches/com.example.app/cache.db" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
+_mole_user_cache_owner_process_state() { return 1; }
+validate_path_for_deletion "$target"
+EOF
     [ "$status" -eq 0 ]
 }
 
@@ -168,6 +195,9 @@ teardown() {
 }
 
 @test "validate_path_for_deletion rejects case aliases of critical roots" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "relies on a case-insensitive root filesystem (macOS APFS)"
+    fi
     run /bin/bash -c "
         source '$PROJECT_ROOT/lib/core/common.sh'
         checked=0
@@ -1168,6 +1198,9 @@ SCRIPT
 }
 
 @test "get_path_size_kb bounds the app metadata fast path" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (mdls .app metadata sizing)"
+    fi
     local app_dir="$TEST_DIR/Stalled.app"
     local mock_bin="$TEST_DIR/stalled-mdls-bin"
     local trace="$TEST_DIR/stalled-mdls.trace"
@@ -1216,6 +1249,9 @@ SCRIPT
 }
 
 @test "safe_remove stops when a size probe is interrupted" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (mdls size probe interrupt)"
+    fi
     local app_dir="$TEST_DIR/Interrupted.app"
     mkdir -p "$app_dir"
 
@@ -1307,8 +1343,12 @@ SCRIPT
     local target_dir="$TEST_DIR/sudo-age-refresh-target"
     local target_file="$target_dir/old.log"
     mkdir -p "$target_dir"
-    touch "$target_file"
-    touch -t "$(date -v-8d '+%Y%m%d%H%M.%S')" "$target_file"
+    # BSD date -t vs GNU touch -d: same 8-days-old mtime on both platforms.
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        touch -t "$(date -v-8d '+%Y%m%d%H%M.%S')" "$target_file"
+    else
+        touch -d '8 days ago' "$target_file"
+    fi
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" TARGET_FILE="$target_file" \
         MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
@@ -1339,7 +1379,7 @@ rc=0
 safe_sudo_find_delete "$TARGET_DIR" "*.log" "1" "f" "1" || rc=$?
 printf 'RC=%s\nCOUNT=%s\n' "$rc" "${MOLE_SAFE_SUDO_FIND_DELETE_COUNT:-unset}"
 [[ -e "$TARGET_FILE" ]] && printf 'SURVIVED\n'
-cat "$HOME/Library/Logs/mole/operations.log" 2> /dev/null || true
+cat "$OPERATIONS_LOG_FILE" 2> /dev/null || true
 SCRIPT
 
     [ "$status" -eq 0 ] || return 1
@@ -1496,7 +1536,7 @@ _mole_privileged_path_has_mutable_ancestor() { return 1; }
 rc=0
 safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" "1" || rc=$?
 printf 'RC=%s\nCOUNT=%s\n' "$rc" "${MOLE_SAFE_SUDO_FIND_DELETE_COUNT:-unset}"
-cat "$HOME/Library/Logs/mole/operations.log" 2> /dev/null || true
+cat "$OPERATIONS_LOG_FILE" 2> /dev/null || true
 SCRIPT
 
     [ "$status" -eq 0 ] || return 1
@@ -1672,7 +1712,7 @@ printf 'RC=%s\n' "$rc"
 printf 'XARGS_CALLS=%s\n' "$(grep -c 'SUDO:-n xargs' "$TRACE" || true)"
 cat "$TRACE"
 echo "--OPLOG--"
-cat "$HOME/Library/Logs/mole/operations.log" 2> /dev/null || true
+cat "$OPERATIONS_LOG_FILE" 2> /dev/null || true
 exit 0
 SCRIPT
     chmod +x "$script"
@@ -1740,7 +1780,7 @@ set -e
 printf 'RC=%s\n' "$rc"
 [[ -e "$TARGET_DIR/a.log" ]] && echo "A_SURVIVED" || echo "A_REMOVED"
 echo "--OPLOG--"
-cat "$HOME/Library/Logs/mole/operations.log" 2> /dev/null || true
+cat "$OPERATIONS_LOG_FILE" 2> /dev/null || true
 exit 0
 SCRIPT
     chmod +x "$script"

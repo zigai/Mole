@@ -1,0 +1,8 @@
+#!/bin/bash
+# Test fixture: uname stub pinning the kernel name for platform detection.
+# Other uname invocations pass through to the real binary.
+if [[ "${1:-}" == "-s" && -n "${FIXTURE_UNAME_S:-}" ]]; then
+    printf '%s\n' "$FIXTURE_UNAME_S"
+    exit 0
+fi
+exec /usr/bin/uname "$@"

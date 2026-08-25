@@ -1,0 +1,6 @@
+#!/bin/bash
+# Fake sudo for tests: records the invocation, then runs the wrapped command.
+# Real usage from mo is always `sudo <command> <args>` with no options.
+printf 'sudo %s\n' "$*" >> "${MOLE_FAKE_TRACE:?MOLE_FAKE_TRACE not set}"
+"$@"
+exit $?

@@ -1,0 +1,5 @@
+NAME="Mysterix"
+PRETTY_NAME="Mysterix GNU/Linux"
+ID=mysterix
+ID_LIKE="fancyos bsdish"
+HOME_URL="https://example.com/"

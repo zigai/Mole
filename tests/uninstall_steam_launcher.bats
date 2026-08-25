@@ -219,7 +219,7 @@ CACHE
     sourceable_uninstall_sh "$src"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" APPS_CACHE_FILE="$apps_cache" SRC_PATH="$src" \
-        MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
+        MOLE_TEST_NO_AUTH=1 MOLE_PLATFORM=darwin /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$SRC_PATH"
 

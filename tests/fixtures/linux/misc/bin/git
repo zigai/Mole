@@ -1,0 +1,10 @@
+#!/bin/bash
+# Test fixture: fake git recording arguments and answering ls-remote for main.
+if [[ -n "${GIT_LOG:-}" ]]; then
+    printf 'git %s\n' "$*" >> "$GIT_LOG"
+fi
+if [[ "${1:-}" == "ls-remote" ]]; then
+    printf '0123456789abcdef0123456789abcdef01234567\trefs/heads/main\n'
+    exit 0
+fi
+exit 1

@@ -1,0 +1,4 @@
+#!/bin/bash
+# Fake flatpak for tests: records the invocation, exits successfully.
+printf 'flatpak %s\n' "$*" >> "${MOLE_FAKE_TRACE:?MOLE_FAKE_TRACE not set}"
+exit 0

@@ -1,0 +1,3 @@
+#!/bin/bash
+# uname stub reporting Darwin so darwin detection can be tested on any host.
+printf 'Darwin\n'

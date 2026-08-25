@@ -1,0 +1,3 @@
+#!/bin/bash
+# Stub flatpak for platform tests.
+exit 0

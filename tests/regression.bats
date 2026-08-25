@@ -22,7 +22,8 @@ setup() {
         set -euo pipefail
         search_dirs=()
         [[ -d "/non/existent/chrome" ]] && search_dirs+=("/non/existent/chrome")
-        [[ -d "/tmp" ]] && search_dirs+=("/tmp")
+        probe_dir="$(mktemp -d)"
+        [[ -d "$probe_dir" ]] && search_dirs+=("$probe_dir")
 
         if [[ ${#search_dirs[@]} -gt 0 ]]; then
             find "${search_dirs[@]}" -maxdepth 1 -type f 2>/dev/null || true

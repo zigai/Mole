@@ -25,6 +25,9 @@ teardown_file() {
 }
 
 setup() {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "exercises Homebrew cask uninstall flows"
+    fi
     # Safety: refuse to operate on a real home directory.
     if [[ "$HOME" != "${BATS_TEST_DIRNAME}/tmp-"* ]]; then
         printf 'FATAL: HOME is not a test temp dir: %s\n' "$HOME" >&2

@@ -1,0 +1,44 @@
+#!/bin/bash
+# Test stub for gio used by tests/linux_fileops_*.bats.
+#
+# Behavior:
+# - MOLE_TEST_GIO_MODE=ok (default): emulates `gio trash <path>` by moving the
+#   target into $MOLE_TEST_TRASH_DIR so callers can assert recoverability.
+# - MOLE_TEST_GIO_MODE=fail: exits nonzero without touching anything.
+# - Every invocation is appended to $MOLE_TEST_GIO_LOG when that variable set.
+if [[ -n "${MOLE_TEST_GIO_LOG:-}" ]]; then
+    printf 'gio %s\n' "$*" >> "$MOLE_TEST_GIO_LOG"
+fi
+
+if [[ "${MOLE_TEST_GIO_MODE:-ok}" == "fail" ]]; then
+    echo "gio: stubbed trash failure" >&2
+    exit 1
+fi
+
+case "${1:-}" in
+    trash) ;;
+    *)
+        echo "gio stub: unsupported subcommand: ${1:-<none>}" >&2
+        exit 2
+        ;;
+esac
+
+# Locate the path operand: the token after the optional `--` separator.
+target=""
+seen_dashdash=false
+for arg in "$@"; do
+    if [[ "$seen_dashdash" == "true" ]]; then
+        target="$arg"
+        break
+    fi
+    [[ "$arg" == "--" ]] && seen_dashdash=true
+done
+
+if [[ -z "$target" || ! -e "$target" && ! -L "$target" ]]; then
+    echo "gio stub: missing trash target" >&2
+    exit 2
+fi
+
+dest_dir="${MOLE_TEST_TRASH_DIR:?MOLE_TEST_TRASH_DIR must point at a fake Trash}"
+mkdir -p "$dest_dir"
+mv -- "$target" "$dest_dir/$(basename "$target")"

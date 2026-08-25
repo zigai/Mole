@@ -1174,7 +1174,11 @@ EOF
     mkdir -p "$neatdm_dir/12345"
     touch "$neatdm_dir/12345/seg.x0"
     # Set mtime to 31 days ago
-    touch -t "$(date -v-31d '+%Y%m%d%H%M.%S')" "$neatdm_dir/12345/seg.x0"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        touch -t "$(date -v-31d '+%Y%m%d%H%M.%S')" "$neatdm_dir/12345/seg.x0"
+    else
+        touch -t "$(date -d '31 days ago' '+%Y%m%d%H%M.%S')" "$neatdm_dir/12345/seg.x0"
+    fi
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -1222,7 +1226,11 @@ EOF
     rm -rf "$neatdm_dir"
     mkdir -p "$neatdm_dir/history-backup"
     touch "$neatdm_dir/history-backup/seg.x0"
-    touch -t "$(date -v-31d '+%Y%m%d%H%M.%S')" "$neatdm_dir/history-backup/seg.x0"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        touch -t "$(date -v-31d '+%Y%m%d%H%M.%S')" "$neatdm_dir/history-backup/seg.x0"
+    else
+        touch -t "$(date -d '31 days ago' '+%Y%m%d%H%M.%S')" "$neatdm_dir/history-backup/seg.x0"
+    fi
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -1402,11 +1410,17 @@ INNER
     local db="$HOME/Library/Caches/com.example.idleapp/Cache.db"
     touch "$db"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=0 /bin/bash --noprofile --norc << 'INNER'
+    # run_with_timeout shells out to lsof through the timeout backend, so a
+    # shell-function stub never runs. Provide an executable mock on PATH:
+    # exit 1 with no records reads as "every family member idle".
+    mkdir -p "$HOME/mock-bin"
+    printf '#!/bin/bash\nexit 1\n' > "$HOME/mock-bin/lsof"
+    chmod +x "$HOME/mock-bin/lsof"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=0 PATH="$HOME/mock-bin:$PATH" /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 pgrep() { return 1; }
-lsof() { return 1; }
 oplog_enabled() { return 1; }
 log_operation() { :; }
 debug_log() { :; }
@@ -1421,6 +1435,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles removes only strictly older versions and keeps every staged version" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1459,6 +1476,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles preserves non-hash and unverified siblings" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1497,6 +1517,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles refuses a symlinked production root" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local autodesk="$HOME/Library/Application Support/Autodesk"
     local external="$HOME/outside-fusion-production"
     rm -rf "$autodesk" "$external"
@@ -1527,6 +1550,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles skips when Autodesk is running" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1556,6 +1582,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles skips while the Autodesk streamer updater is running" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1584,6 +1613,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles skips when Autodesk process state is unknown" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1611,6 +1643,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles skips when current alias is broken" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local old="$prod/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -1637,6 +1672,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles stops when the current alias changes during sizing" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1668,6 +1706,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles stops when Autodesk starts during sizing" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1695,6 +1736,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles rejects a candidate replaced during sizing" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk" "$HOME/fusion-replacement"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1728,6 +1772,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles reports a failed removal and continues" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1771,6 +1818,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles avoids a duplicate real-mode post-size guard" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1812,6 +1862,9 @@ INNER
 }
 
 @test "clean_autodesk_fusion_old_bundles propagates a final sink interrupt" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1855,6 +1908,9 @@ INNER
 }
 
 @test "Autodesk Fusion final guard catches the streamer starting during metadata probes" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1901,6 +1957,9 @@ INNER
 }
 
 @test "Autodesk Fusion final guard catches the current alias switching during candidate probes" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1960,6 +2019,9 @@ INNER
 }
 
 @test "Autodesk Fusion final guard catches the current alias switching during its final process probe" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -2010,6 +2072,9 @@ INNER
 }
 
 @test "Autodesk Fusion final current resolver rebinds the alias after metadata probes" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -2069,6 +2134,9 @@ INNER
 }
 
 @test "Finder alias resolver passes the alias path as inert argv" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
     local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

@@ -1,0 +1,3 @@
+#!/bin/bash
+# Stub yay AUR helper for platform tests.
+exit 0

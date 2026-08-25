@@ -157,17 +157,20 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
 load_whitelist
-has_sentinel=false
+has_protected=false
 has_custom=false
 for p in "${CURRENT_WHITELIST_PATTERNS[@]}"; do
-    [[ "$p" == "$FINDER_METADATA_SENTINEL" ]] && has_sentinel=true
+    # darwin merges the Finder-metadata sentinel; linux merges its XDG
+    # hard-safety roots instead.
+    [[ "$p" == "$FINDER_METADATA_SENTINEL" ]] && has_protected=true
+    case "$p" in */mole*) has_protected=true ;; esac
     [[ "$p" == "$HOME/.cache/custom-keep/*" ]] && has_custom=true
 done
-printf 'sentinel=%s custom=%s count=%s\n' "$has_sentinel" "$has_custom" "${#CURRENT_WHITELIST_PATTERNS[@]}"
+printf 'protected=%s custom=%s count=%s\n' "$has_protected" "$has_custom" "${#CURRENT_WHITELIST_PATTERNS[@]}"
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [[ "$output" == *"sentinel=true"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"protected=true"* ]] || { echo "$output"; return 1; }
     [[ "$output" == *"custom=true"* ]] || { echo "$output"; return 1; }
 }
 
@@ -176,6 +179,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 declare -a WHITELIST_PATTERNS=("$HOME/.cache/custom-keep/*" "$FINDER_METADATA_SENTINEL")
+SEEDED_PATTERNS=("${WHITELIST_PATTERNS[@]}")
 declare -a CURRENT_WHITELIST_PATTERNS=("${WHITELIST_PATTERNS[@]}")
 ensure_safety_whitelist_patterns
 ensure_safety_whitelist_patterns
@@ -196,7 +200,17 @@ for safety in "${SAFETY_WHITELIST_PATTERNS[@]}"; do
     done
     [[ $seen -eq 1 ]] || duplicated=$((duplicated + 1))
 done
-expected_total=$((1 + ${#SAFETY_WHITELIST_PATTERNS[@]}))
+# Seeded entries already covered by hard safety merge once instead of
+# duplicating, so the expected total is safety plus uncovered seeds. On
+# darwin the sentinel is a safety entry; on linux it stays a custom seed.
+expected_total=${#SAFETY_WHITELIST_PATTERNS[@]}
+for seeded in "${SEEDED_PATTERNS[@]}"; do
+    covered=false
+    for safety in "${SAFETY_WHITELIST_PATTERNS[@]}"; do
+        [[ "$seeded" == "$safety" ]] && covered=true
+    done
+    [[ "$covered" == true ]] || expected_total=$((expected_total + 1))
+done
 printf 'sentinel=%s custom=%s duplicated=%s total_matches_expected=%s\n' \
     "$sentinel_count" "$custom_count" "$duplicated" \
     "$([[ ${#WHITELIST_PATTERNS[@]} -eq $expected_total ]] && echo yes || echo no)"
@@ -231,6 +245,9 @@ EOF
 }
 
 @test "whitelist inventory exposes LM Studio app cache" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
@@ -243,6 +260,9 @@ EOF
 }
 
 @test "whitelist inventory exposes Codex staging and Tart caches" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
@@ -304,6 +324,9 @@ EOF
 
 @test "whitelist inventory exposes guarded PyInstaller and Clang caches" {
     local darwin_cache="$HOME/darwin-cache"
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DARWIN_CACHE="$darwin_cache" \
         /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -377,6 +400,9 @@ EOF
 }
 
 @test "whitelist inventory exposes Chrome AI model stores" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
@@ -465,7 +491,14 @@ EOF
         source '$PROJECT_ROOT/lib/manage/whitelist.sh'
         rm -f \"\$HOME/.config/mole/whitelist\"
         load_whitelist
-        is_path_whitelisted \"\$HOME/Library/Caches/tealdeer\"
+        # tldr pages live under ~/Library/Caches on darwin and ~/.cache on
+        # linux; assert the parent of whichever default pattern applies.
+        if [[ \"\${MOLE_PLATFORM:-}\" == \"linux\" ]]; then
+            tealdeer_parent=\"\$HOME/.cache/tealdeer\"
+        else
+            tealdeer_parent=\"\$HOME/Library/Caches/tealdeer\"
+        fi
+        is_path_whitelisted \"\$tealdeer_parent\"
     "; then
         status=0
     else

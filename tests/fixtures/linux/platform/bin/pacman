@@ -1,0 +1,11 @@
+#!/bin/bash
+# Stub pacman for platform tests. Emits two orphan packages for -Qtdq.
+case "${1:-}" in
+    -Qtdq)
+        printf 'orphan-a\norphan-b\n'
+        ;;
+    *)
+        :
+        ;;
+esac
+exit 0

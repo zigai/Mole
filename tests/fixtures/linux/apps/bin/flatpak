@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Fake flatpak for Mole Linux uninstall tests.
+# Driven by MOLE_FAKE_FLATPAK_LIST (a file with lines: id<TAB>Name<TAB>size).
+# Supported: list --app [--columns=<spec>] where spec is a comma-separated
+# subset of application,name,size.
+
+set -euo pipefail
+
+LIST_FILE="${MOLE_FAKE_FLATPAK_LIST:-}"
+if [[ -z "$LIST_FILE" || ! -f "$LIST_FILE" ]]; then
+    exit 0
+fi
+
+case "${1:-}" in
+    list)
+        cols="application"
+        for arg in "$@"; do
+            case "$arg" in
+                --columns=*) cols="${arg#--columns=}" ;;
+            esac
+        done
+        case "$cols" in
+            *name*size* | *size*name*) cat "$LIST_FILE" ;;
+            *name*) awk -F'\t' '{ print $1 "\t" $2 }' "$LIST_FILE" ;;
+            *) cut -f1 "$LIST_FILE" ;;
+        esac
+        ;;
+    *)
+        echo "fake flatpak: unsupported invocation: $*" >&2
+        exit 1
+        ;;
+esac

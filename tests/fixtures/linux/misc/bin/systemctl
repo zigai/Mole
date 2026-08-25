@@ -1,0 +1,7 @@
+#!/bin/bash
+# Test fixture: fake systemctl printing two failed units.
+cat <<'UNITS'
+nginx.service                loaded failed failed  A high performance web server
+docker.service               loaded failed failed  Docker Application Container Engine
+UNITS
+exit 0

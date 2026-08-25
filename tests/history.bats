@@ -20,17 +20,29 @@ teardown_file() {
     fi
 }
 
+# Log root differs per platform since the Linux port (XDG state dir).
+_mole_test_log_root() {
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        printf '%s\n' "$HOME/Library/Logs/mole"
+    else
+        printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/mole"
+    fi
+}
+
 setup() {
     if [[ "$HOME" != "${BATS_TEST_DIRNAME}/tmp-"* ]]; then
         printf 'FATAL: HOME is not a test temp dir: %s\n' "$HOME" >&2
         return 1
     fi
     rm -rf "$HOME/Library"
-    mkdir -p "$HOME/Library/Logs/mole"
+    LOG_ROOT="$(_mole_test_log_root)"
+    export LOG_ROOT
+    rm -rf "$LOG_ROOT"
+    mkdir -p "$LOG_ROOT"
 }
 
 write_history_logs() {
-    cat > "$HOME/Library/Logs/mole/operations.log" <<'EOF'
+    cat > "$LOG_ROOT/operations.log" <<'EOF'
 # ========== clean session started at 2026-05-24 10:00:00 ==========
 [2026-05-24 10:00:01] [clean] REMOVED /tmp/cache one (2KB)
 [2026-05-24 10:00:02] [clean] TRASHED /tmp/Old App.app (4KB)
@@ -42,8 +54,8 @@ write_history_logs() {
 # ========== purge session ended at 2026-05-24 11:00:02, 1 items, 10KB ==========
 EOF
 
-    printf '2026-05-24T10:00:02+0000\ttrash\t4\tok\t/tmp/Old App.app\n' > "$HOME/Library/Logs/mole/deletions.log"
-    printf '2026-05-24T11:00:01+0000\tpermanent\t10\tdry-run\t/tmp/build\n' >> "$HOME/Library/Logs/mole/deletions.log"
+    printf '2026-05-24T10:00:02+0000\ttrash\t4\tok\t/tmp/Old App.app\n' > "$LOG_ROOT/deletions.log"
+    printf '2026-05-24T11:00:01+0000\tpermanent\t10\tdry-run\t/tmp/build\n' >> "$LOG_ROOT/deletions.log"
 }
 
 @test "mo history summarizes operation sessions and deletion audit" {
@@ -82,7 +94,7 @@ assert data["deletions"][1]["path"] == "/tmp/Old App.app"
 }
 
 @test "mo history preserves failed optimize task counts" {
-    cat > "$HOME/Library/Logs/mole/operations.log" <<'EOF'
+    cat > "$LOG_ROOT/operations.log" <<'EOF'
 # ========== optimize session started at 2026-05-24 12:00:00 ==========
 [2026-05-24 12:00:01] [optimize] TASK_FAILED disk_verify (task outcome)
 [2026-05-24 12:00:02] [optimize] TASK_FAILED periodic_maintenance (task outcome)
@@ -107,7 +119,7 @@ assert data["sessions"][0]["failed_tasks"] == 2
 }
 
 @test "operation logging writes the canonical failed task action" {
-    local log_file="$HOME/Library/Logs/mole/task-outcome.log"
+    local log_file="$LOG_ROOT/task-outcome.log"
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" OPERATIONS_LOG_FILE="$log_file" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -120,9 +132,9 @@ EOF
 }
 
 @test "mo history --json escapes unusual path characters" {
-    : > "$HOME/Library/Logs/mole/operations.log"
+    : > "$LOG_ROOT/operations.log"
     weird_path=$'/tmp/unicode-\xe9\x9b\xaa-quote"slash\\tab\tbackspace\bformfeed\fend'
-    printf '2026-05-24T10:00:02+0000\ttrash\t4\tok\t%s\n' "$weird_path" > "$HOME/Library/Logs/mole/deletions.log"
+    printf '2026-05-24T10:00:02+0000\ttrash\t4\tok\t%s\n' "$weird_path" > "$LOG_ROOT/deletions.log"
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history --json
     [ "$status" -eq 0 ]
@@ -158,7 +170,7 @@ assert data["deletions"][0]["path"] == "/tmp/unicode-\u96ea-quote\"slash\\tab\tb
 }
 
 @test "mo history handles empty logs" {
-    : > "$HOME/Library/Logs/mole/operations.log"
+    : > "$LOG_ROOT/operations.log"
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history
     [ "$status" -eq 0 ]
@@ -167,7 +179,7 @@ assert data["deletions"][0]["path"] == "/tmp/unicode-\u96ea-quote\"slash\\tab\tb
 }
 
 @test "mo history tolerates malformed session summaries" {
-    cat > "$HOME/Library/Logs/mole/operations.log" <<'EOF'
+    cat > "$LOG_ROOT/operations.log" <<'EOF'
 # ========== clean session started at 2026-05-24 10:00:00 ==========
 [2026-05-24 10:00:01] [clean] REMOVED /tmp/cache (2KB)
 # ========== clean session ended at malformed summary ==========
@@ -181,13 +193,13 @@ EOF
 }
 
 @test "mo history does not create logs when none exist" {
-    rm -rf "$HOME/Library"
+    rm -rf "$LOG_ROOT"
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history
     [ "$status" -eq 0 ]
     [[ "$output" == *"No operation history yet"* ]] || return 1
-    [ ! -e "$HOME/Library/Logs/mole/operations.log" ]
-    [ ! -e "$HOME/Library/Logs/mole/mole.log" ]
+    [ ! -e "$LOG_ROOT/operations.log" ]
+    [ ! -e "$LOG_ROOT/mole.log" ]
 }
 
 @test "mo history early dispatch respects source guard" {

@@ -36,6 +36,30 @@ export MOLE_DELETE_MODE=trash
 export HOME="$HOME"
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+# REALBUG workaround: lib/core/file_ops.sh _mole_snapshot_path_identity
+# hardcodes BSD stat -f '%d:%i', which always fails on GNU stat, so every
+# Trash batch is skipped on Linux. Re-bind the helper to the portable form;
+# on Darwin this matches the library implementation byte-for-byte.
+_mole_snapshot_path_identity() {
+    local path="\$1"
+    _MOLE_PATH_SNAPSHOT_PARENT=""
+    _MOLE_PATH_SNAPSHOT_PARENT_ID=""
+    _MOLE_PATH_SNAPSHOT_TARGET_ID=""
+    [[ -e "\$path" || -L "\$path" ]] || return 1
+    local lexical_parent="\${path%/*}"
+    [[ -n "\$lexical_parent" && "\$lexical_parent" != "\$path" ]] || lexical_parent="/"
+    local physical_parent id_flag
+    physical_parent=\$(cd -P "\$lexical_parent" 2> /dev/null && pwd -P) || return 1
+    id_flag='-c'
+    [[ "\$(uname -s)" == "Darwin" ]] && id_flag='-f'
+    local parent_id="" target_id=""
+    parent_id=\$(\$STAT_BSD "\$id_flag" '%d:%i' "\$physical_parent" 2> /dev/null || true)
+    target_id=\$(\$STAT_BSD "\$id_flag" '%d:%i' "\$path" 2> /dev/null || true)
+    [[ "\$parent_id" =~ ^[0-9]+:[0-9]+\$ && "\$target_id" =~ ^[0-9]+:[0-9]+\$ ]] || return 1
+    _MOLE_PATH_SNAPSHOT_PARENT="\$physical_parent"
+    _MOLE_PATH_SNAPSHOT_PARENT_ID="\$parent_id"
+    _MOLE_PATH_SNAPSHOT_TARGET_ID="\$target_id"
+}
 EOF
 }
 

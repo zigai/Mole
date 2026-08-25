@@ -589,6 +589,7 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
 
 defaults() { echo "1"; }
+tmutil() { return 0; }
 
 
 run_with_timeout() {
@@ -650,6 +651,9 @@ EOF
 }
 
 @test "clean_homebrew runs cleanup with timeout stubs" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -695,6 +699,9 @@ EOF
 }
 
 @test "clean_homebrew prevents cleanup from implicitly autoremoving formulae" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -754,6 +761,9 @@ EOF
 }
 
 @test "clean_homebrew restores an active Cellar link removed by cleanup (#1206)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -812,6 +822,9 @@ EOF
 }
 
 @test "clean_homebrew does not restore a link after its Cellar target is removed (#1206)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -858,6 +871,9 @@ EOF
 }
 
 @test "clean_homebrew does not restore executable links outside the Cellar (#1206)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -993,6 +1009,9 @@ EOF
 }
 
 @test "clean_homebrew dry-run shows brew autoremove preview without removing formulae" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1061,6 +1080,9 @@ EOF
 }
 
 @test "opt_saved_state_cleanup removes old saved states" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local state_dir="$HOME/Library/Saved Application State"
     mkdir -p "$state_dir/com.example.app.savedState"
     touch "$state_dir/com.example.app.savedState/data.plist"
@@ -1078,6 +1100,9 @@ EOF
 }
 
 @test "opt_saved_state_cleanup handles missing state directory" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     rm -rf "$HOME/Library/Saved Application State"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
@@ -1092,6 +1117,9 @@ EOF
 }
 
 @test "opt_saved_state_cleanup reports a removal failure" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local state_dir="$HOME/Library/Saved Application State"
     mkdir -p "$state_dir/com.example.old.savedState"
     touch -t 202301010000 "$state_dir/com.example.old.savedState" 2> /dev/null || true
@@ -1109,6 +1137,9 @@ EOF
 }
 
 @test "opt_cache_refresh reports a removal failure" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local cache_dir="$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache"
     mkdir -p "$cache_dir"
     touch "$cache_dir/test.db"
@@ -1128,6 +1159,9 @@ EOF
 }
 
 @test "opt_cache_refresh cleans Quick Look cache" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     mkdir -p "$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache"
     touch "$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache/test.db"
 
@@ -1177,6 +1211,9 @@ EOF
 }
 
 @test "opt_fix_broken_configs reports fixes" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1394,7 +1431,7 @@ source "$PROJECT_ROOT/lib/clean/system.sh"
 
 sudo() {
     [[ "${1:-}" == "-n" ]] && shift
-    if [[ "${1:-}" == "$STAT_BSD" && "${2:-}" == "-f%z" && "${3:-}" == "$MOLE_ACTIVE_POWERLOG_DB_PATH" ]]; then
+    if [[ "${1:-}" == "$STAT_BSD" && "${2:-}" == "${_MOLE_STAT_SIZE_FLAG}" && "${3:-}" == "$MOLE_ACTIVE_POWERLOG_DB_PATH" ]]; then
         echo $((10 * 1024 * 1024 * 1024))
         return 0
     fi
@@ -1817,6 +1854,9 @@ EOF
 }
 
 @test "opt_network_stack_optimize skips when network is healthy" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1848,6 +1888,9 @@ EOF
 }
 
 @test "opt_network_stack_optimize skips when VPN is active" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=1 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1875,6 +1918,9 @@ EOF
 }
 
 @test "opt_network_stack_optimize flushes when network has issues" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1932,6 +1978,9 @@ EOF
 }
 
 @test "opt_disk_permissions_repair skips when permissions are fine" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1953,6 +2002,9 @@ EOF
 }
 
 @test "opt_disk_permissions_repair calls diskutil when needed" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1990,6 +2042,9 @@ EOF
 }
 
 @test "opt_spotlight_index_optimize skips when search is fast" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2022,6 +2077,9 @@ EOF
 }
 
 @test "software_update_pending_or_unknown fails closed and trusts only an empty RecommendedUpdates array" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2103,6 +2161,9 @@ EOF
 }
 
 @test "time_machine_candidate_still_eligible rejects replacement symlink and active backup races" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2153,6 +2214,9 @@ EOF
 }
 
 @test "macos_installer_candidate_still_eligible rejects invalid age replacement active and pending races" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"

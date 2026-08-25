@@ -67,8 +67,12 @@ setup() {
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @test "scan_installers_in_path (fallback find): finds .dmg files" {
+	# .dmg is a darwin-only installer artifact; the linux extension list
+	# (pkg.tar.zst/deb/rpm/AppImage/iso/tar.gz/tar.xz) never matches it.
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	touch "$HOME/Downloads/Chrome.dmg"
-
 	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
@@ -80,10 +84,19 @@ setup() {
 }
 
 @test "scan_installers_in_path (fallback find): finds multiple installer types" {
-	touch "$HOME/Downloads/App1.dmg"
-	touch "$HOME/Downloads/App2.pkg"
 	touch "$HOME/Downloads/App3.iso"
-	touch "$HOME/Downloads/App.mpkg"
+	# Extension sets differ per platform: darwin hunts .dmg/.pkg/.mpkg,
+	# linux hunts .deb/.rpm/.AppImage. .iso is shared and pins the shared
+	# branch of the extension list on both.
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		touch "$HOME/Downloads/App1.dmg"
+		touch "$HOME/Downloads/App2.pkg"
+		touch "$HOME/Downloads/App.mpkg"
+	else
+		touch "$HOME/Downloads/App1.deb"
+		touch "$HOME/Downloads/App2.rpm"
+		touch "$HOME/Downloads/App.AppImage"
+	fi
 
 	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
@@ -92,18 +105,24 @@ setup() {
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"App1.dmg"* ]] || return 1
-	[[ "$output" == *"App2.pkg"* ]] || return 1
-	[[ "$output" == *"App3.iso"* ]] || return 1
-	[[ "$output" == *"App.mpkg"* ]]
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		[[ "$output" == *"App1.dmg"* ]] || return 1
+		[[ "$output" == *"App2.pkg"* ]] || return 1
+		[[ "$output" == *"App.mpkg"* ]] || return 1
+	else
+		[[ "$output" == *"App1.deb"* ]] || return 1
+		[[ "$output" == *"App2.rpm"* ]] || return 1
+		[[ "$output" == *"App.AppImage"* ]] || return 1
+	fi
+	[[ "$output" == *"App3.iso"* ]]
 }
 
 @test "scan_installers_in_path (fallback find): respects max depth" {
 	mkdir -p "$HOME/Downloads/level1/level2/level3"
-	touch "$HOME/Downloads/shallow.dmg"
-	touch "$HOME/Downloads/level1/mid.dmg"
-	touch "$HOME/Downloads/level1/level2/deep.dmg"
-	touch "$HOME/Downloads/level1/level2/level3/too-deep.dmg"
+	touch "$HOME/Downloads/shallow.iso"
+	touch "$HOME/Downloads/level1/mid.iso"
+	touch "$HOME/Downloads/level1/level2/deep.iso"
+	touch "$HOME/Downloads/level1/level2/level3/too-deep.iso"
 
 	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
@@ -114,17 +133,18 @@ setup() {
 	[ "$status" -eq 0 ]
 	# Default max depth is 2 (INSTALLER_SCAN_MAX_DEPTH_DEFAULT), so level2 and below
 	# must be excluded. Assert on the containing path, not the bare filename:
-	# *"deep.dmg"* also matches too-deep.dmg, which hid the boundary entirely.
-	[[ "$output" == *"/shallow.dmg"* ]] || return 1
-	[[ "$output" == *"/level1/mid.dmg"* ]] || return 1
-	[[ "$output" != *"/level1/level2/deep.dmg"* ]] || return 1
-	[[ "$output" != *"/level1/level2/level3/too-deep.dmg"* ]]
+	# *"deep.iso"* also matches too-deep.iso, which hid the boundary entirely.
+	# .iso is used because it is an installer extension on both platforms.
+	[[ "$output" == *"/shallow.iso"* ]] || return 1
+	[[ "$output" == *"/level1/mid.iso"* ]] || return 1
+	[[ "$output" != *"/level1/level2/deep.iso"* ]] || return 1
+	[[ "$output" != *"/level1/level2/level3/too-deep.iso"* ]]
 }
 
 @test "scan_installers_in_path (fallback find): honors MOLE_INSTALLER_SCAN_MAX_DEPTH" {
 	mkdir -p "$HOME/Downloads/level1"
-	touch "$HOME/Downloads/top.dmg"
-	touch "$HOME/Downloads/level1/nested.dmg"
+	touch "$HOME/Downloads/top.iso"
+	touch "$HOME/Downloads/level1/nested.iso"
 
 	run env PATH="/usr/bin:/bin" MOLE_INSTALLER_SCAN_MAX_DEPTH=1 /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
@@ -132,9 +152,8 @@ setup() {
         scan_installers_in_path \"\$2\"
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"top.dmg"* ]] || return 1
-	[[ "$output" != *"nested.dmg"* ]]
+	[[ "$output" == *"top.iso"* ]] || return 1
+	[[ "$output" != *"nested.iso"* ]]
 }
 
 @test "scan_installers_in_path (fallback find): handles non-existent directory" {
@@ -150,9 +169,13 @@ setup() {
 
 @test "scan_installers_in_path (fallback find): ignores non-installer files" {
 	touch "$HOME/Downloads/document.pdf"
-	touch "$HOME/Downloads/image.jpg"
-	touch "$HOME/Downloads/archive.tar.gz"
-	touch "$HOME/Downloads/Installer.dmg"
+	# .tar.gz is an installer extension on linux, so only assert its
+	# rejection on darwin.
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		touch "$HOME/Downloads/archive.tar.gz"
+	fi
+	touch "$HOME/Downloads/Installer.iso"
+	touch "$HOME/Downloads/notes.txt"
 
 	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
@@ -163,8 +186,11 @@ setup() {
 	[ "$status" -eq 0 ]
 	[[ "$output" != *"document.pdf"* ]] || return 1
 	[[ "$output" != *"image.jpg"* ]] || return 1
-	[[ "$output" != *"archive.tar.gz"* ]] || return 1
-	[[ "$output" == *"Installer.dmg"* ]]
+	[[ "$output" != *"notes.txt"* ]] || return 1
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		[[ "$output" != *"archive.tar.gz"* ]] || return 1
+	fi
+	[[ "$output" == *"Installer.iso"* ]]
 }
 
 @test "scan_all_installers: handles missing paths gracefully" {
@@ -178,7 +204,7 @@ setup() {
 	mkdir -p "$HOME/Downloads"
 
 	# Add an installer to the one directory that exists
-	touch "$HOME/Downloads/test.dmg"
+	touch "$HOME/Downloads/test.iso"
 
 	run /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
@@ -189,13 +215,13 @@ setup() {
 	# Should succeed even with missing paths
 	[ "$status" -eq 0 ]
 	# Should still find the installer in the existing directory
-	[[ "$output" == *"test.dmg"* ]]
+	[[ "$output" == *"test.iso"* ]]
 }
 
 # Test edge cases
 
 @test "scan_installers_in_path (fallback find): handles filenames with spaces" {
-	touch "$HOME/Downloads/My App Installer.dmg"
+	touch "$HOME/Downloads/My App Installer.iso"
 
 	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
@@ -204,11 +230,11 @@ setup() {
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"My App Installer.dmg"* ]]
+	[[ "$output" == *"My App Installer.iso"* ]]
 }
-
 @test "scan_installers_in_path (fallback find): handles filenames with special characters" {
-	touch "$HOME/Downloads/App-v1.2.3_beta.pkg"
+
+	touch "$HOME/Downloads/App-v1.2.3_beta.iso"
 
 	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
@@ -217,7 +243,7 @@ setup() {
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"App-v1.2.3_beta.pkg"* ]]
+	[[ "$output" == *"App-v1.2.3_beta.iso"* ]]
 }
 
 @test "scan_installers_in_path (fallback find): returns empty for directory with no installers" {
@@ -238,8 +264,8 @@ setup() {
 # Symlink handling tests
 
 @test "scan_installers_in_path (fallback find): skips symlinks to regular files" {
-	touch "$HOME/Downloads/real.dmg"
-	ln -s "$HOME/Downloads/real.dmg" "$HOME/Downloads/symlink.dmg"
+	touch "$HOME/Downloads/real.iso"
+	ln -s "$HOME/Downloads/real.iso" "$HOME/Downloads/symlink.iso"
 	ln -s /nonexistent "$HOME/Downloads/dangling.lnk"
 
 	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
@@ -249,14 +275,15 @@ setup() {
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"real.dmg"* ]] || return 1
-	[[ "$output" != *"symlink.dmg"* ]] || return 1
+	[[ "$output" == *"real.iso"* ]] || return 1
+	[[ "$output" != *"symlink.iso"* ]] || return 1
 	[[ "$output" != *"dangling.lnk"* ]]
 }
 
 @test "delete_selected_installers removes selected files and records successes" {
-	local first="$HOME/Downloads/First.dmg"
-	local second="$HOME/Downloads/Second.pkg"
+	# .iso is an installer extension on both platforms.
+	local first="$HOME/Downloads/First.iso"
+	local second="$HOME/Downloads/Second.iso"
 	printf 'one' > "$first"
 	printf 'two' > "$second"
 
@@ -275,7 +302,11 @@ setup() {
         printf "deleted=%s failed=%s freed=%s\n" "$total_deleted" "${total_delete_failed:-0}" "$total_size_freed_kb"
         [[ ! -e "$2" ]] || return 1
         [[ ! -e "$3" ]] || return 1
-        grep -F "[installer] REMOVED $2" "$HOME/Library/Logs/mole/operations.log" > /dev/null
+        # The operations log lives under Library/Logs on darwin and under
+        # XDG_STATE_HOME on linux.
+        op_log="$HOME/Library/Logs/mole/operations.log"
+        [[ "$(uname -s)" == "Darwin" ]] || op_log="${XDG_STATE_HOME:-$HOME/.local/state}/mole/operations.log"
+        grep -F "[installer] REMOVED $2" "$op_log" > /dev/null
     ' bash "$PROJECT_ROOT/bin/installer.sh" "$first" "$second"
 
 	[ "$status" -eq 0 ]
@@ -283,7 +314,7 @@ setup() {
 }
 
 @test "delete_selected_installers records protected-path failures" {
-	local removable="$HOME/Downloads/Good.dmg"
+	local removable="$HOME/Downloads/Good.iso"
 	printf 'good' > "$removable"
 
 	# shellcheck disable=SC2016
@@ -293,8 +324,11 @@ setup() {
         export MOLE_DELETE_LOG="$HOME/deletions.log"
         source "$1"
 
-        system_size=$(get_file_size "/System")
-        INSTALLER_PATHS=("$2" "/System")
+        # /System only exists on darwin; /etc is the shared always-protected
+        # arm of the deletion policy.
+        if [[ "$(uname -s)" == "Darwin" ]]; then protected="/System"; else protected="/etc"; fi
+        system_size=$(get_file_size "$protected")
+        INSTALLER_PATHS=("$2" "$protected")
         INSTALLER_SIZES=(4 "$system_size")
         MOLE_SELECTION_RESULT="0,1"
 
@@ -311,7 +345,12 @@ setup() {
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"rc=3 deleted=1 failed=1"* ]] || return 1
-	[[ "$output" == *"failure=/System (delete failed)"* ]]
+	# The failure line names whichever protected path was refused.
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		[[ "$output" == *"failure=/System (delete failed)"* ]]
+	else
+		[[ "$output" == *"failure=/etc (delete failed)"* ]]
+	fi
 }
 
 @test "execute_installer_delete_plan refuses replaced files" {

@@ -37,6 +37,10 @@ EOF
 }
 
 @test "needs_permissions_repair ignores PATH-provided GNU stat (#1196)" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "needs_permissions_repair still hardcodes BSD stat flags (-f %Su)"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" USER="$USER" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -76,6 +80,10 @@ EOF
 }
 
 @test "dry-run keeps healthy conditional system tasks unchanged" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 MOLE_ASSUME_VPN_ACTIVE=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -99,6 +107,10 @@ EOF
 }
 
 @test "opt_system_maintenance reports DNS and Spotlight" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -117,6 +129,10 @@ EOF
 }
 
 @test "opt_network_optimization refreshes DNS" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -192,6 +208,10 @@ EOF
 }
 
 @test "opt_fix_broken_configs debug lists only successfully repaired paths" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	local test_home="$HOME/fixprefs-debug-paths"
 	local repaired="$test_home/Library/Preferences/com.example.repaired.plist"
 	local failed="$test_home/Library/Preferences/com.example.failed.plist"
@@ -277,6 +297,10 @@ EOF
 }
 
 @test "opt_fix_broken_configs reports partial results when scan hits its time budget" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	local test_home="$HOME/fixprefs-budget"
 	run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TIMEOUT_HINT_SCAN_SEC=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -299,6 +323,10 @@ EOF
 }
 
 @test "opt_cache_refresh reuses measured cache sizes for deletion" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -399,6 +427,10 @@ EOF
 }
 
 @test "opt_quarantine_cleanup reports clean when no database" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -411,6 +443,10 @@ EOF
 }
 
 @test "opt_quarantine_cleanup reports entries in dry-run" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -432,6 +468,10 @@ EOF
 }
 
 @test "opt_quarantine_cleanup skips when sqlite3 unavailable" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -445,6 +485,10 @@ EOF
 }
 
 @test "execute_optimization dispatches quarantine_cleanup" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -460,6 +504,10 @@ EOF
 }
 
 @test "opt_sqlite_vacuum reports sqlite3 unavailable" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -474,6 +522,10 @@ EOF
 }
 
 @test "opt_sqlite_vacuum reports failed when only some databases optimize" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME/sqlite-partial" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -508,6 +560,10 @@ EOF
 }
 
 @test "opt_sqlite_vacuum reports a failed integrity probe" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME/sqlite-integrity" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -538,6 +594,10 @@ EOF
 }
 
 @test "opt_sqlite_vacuum reports oversized databases as skipped" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME/sqlite-oversized" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -565,6 +625,10 @@ EOF
 }
 
 @test "opt_prevent_network_dsstore dry-run reports enabled" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -583,6 +647,10 @@ EOF
 }
 
 @test "opt_prevent_network_dsstore idempotent when already set" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -602,6 +670,10 @@ EOF
 }
 
 @test "opt_prevent_network_dsstore reports a partial write failure" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -625,6 +697,10 @@ EOF
 }
 
 @test "opt_legacy_overrides_audit stays silent-positive when defaults are in effect" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -643,6 +719,10 @@ EOF
 }
 
 @test "opt_legacy_overrides_audit removes App Nap and skip-verify overrides (#1242 #1243)" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -670,6 +750,10 @@ EOF
 }
 
 @test "opt_legacy_overrides_audit dry-run previews without deleting" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -691,6 +775,10 @@ EOF
 }
 
 @test "opt_legacy_overrides_audit honors plist whitelist before repair" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -713,6 +801,10 @@ EOF
 }
 
 @test "opt_legacy_overrides_audit reports failed after a partial repair" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -741,6 +833,10 @@ EOF
 # expectation outlived that decision only because the assertion sat mid-test and
 # could not fail.
 @test "prevent_network_dsstore is auto-run and described in optimize health json" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/check/health_json.sh"
@@ -760,6 +856,10 @@ EOF
 }
 
 @test "execute_optimization dispatches actions" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -800,6 +900,10 @@ EOF
 }
 
 @test "opt_prune_spotlight_orphan_rules removes orphan but keeps system, apple and installed rules" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -834,6 +938,10 @@ EOF
 }
 
 @test "opt_prune_spotlight_orphan_rules dry-run reports but does not write" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -863,6 +971,10 @@ EOF
 }
 
 @test "opt_prune_spotlight_orphan_rules reports clean when every rule still has its app" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -892,6 +1004,10 @@ EOF
 }
 
 @test "opt_prune_spotlight_orphan_rules propagates an interrupted app resolver" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -921,6 +1037,10 @@ EOF
 }
 
 @test "opt_spotlight_index_optimize reports optimal when probes are fast" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 STUB="$HOME/spotlight-stubs"
@@ -942,6 +1062,10 @@ EOF
 }
 
 @test "opt_spotlight_index_optimize skips the speed probe on battery" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 STUB="$HOME/spotlight-stubs-battery"
@@ -963,6 +1087,10 @@ EOF
 }
 
 @test "opt_spotlight_index_optimize dry-run reports rebuild when probes are slow" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 MOLE_OPTIMIZE_SPOTLIGHT_SLOW_SEC=-1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 STUB="$HOME/spotlight-stubs-slow"
@@ -982,6 +1110,10 @@ EOF
 }
 
 @test "opt_prune_spotlight_orphan_rules reports clean when rules key is absent" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -995,6 +1127,10 @@ EOF
 }
 
 @test "execute_optimization dispatches spotlight_orphan_rules_cleanup" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1010,6 +1146,10 @@ EOF
 }
 
 @test "opt_launch_services_rebuild handles missing lsregister without exiting" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1028,6 +1168,10 @@ EOF
 }
 
 @test "opt_launch_agents_cleanup reports healthy when no directory" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1040,6 +1184,10 @@ EOF
 }
 
 @test "opt_launch_agents_cleanup detects broken agents" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1069,6 +1217,10 @@ EOF
 }
 
 @test "opt_launch_agents_cleanup skips healthy agents" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1099,6 +1251,10 @@ EOF
 }
 
 @test "opt_launch_agents_cleanup spares agents on unmounted volumes" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1130,6 +1286,10 @@ EOF
 }
 
 @test "execute_optimization dispatches launch_agents_cleanup" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1145,6 +1305,10 @@ EOF
 }
 
 @test "opt_periodic_maintenance reports current when log is fresh" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1163,6 +1327,10 @@ EOF
 }
 
 @test "opt_periodic_maintenance ignores non-BSD stat earlier in PATH" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1189,6 +1357,10 @@ EOF
 }
 
 @test "opt_periodic_maintenance triggers in dry-run when log is stale" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1207,6 +1379,10 @@ EOF
 }
 
 @test "opt_periodic_maintenance triggers in dry-run when log is missing" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1222,6 +1398,10 @@ EOF
 }
 
 @test "opt_periodic_maintenance reports skipped without admin access" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1237,6 +1417,10 @@ EOF
 }
 
 @test "opt_periodic_maintenance reports command failure" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=0 MOLE_TEST_MODE=0 MOLE_OPTIMIZE_SUDO_AVAILABLE=true /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1253,6 +1437,10 @@ EOF
 }
 
 @test "opt_disk_verify reports a timed out probe as failed" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ENABLE_DISK_VERIFY=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1269,6 +1457,10 @@ EOF
 }
 
 @test "opt_network_stack_optimize reports a partial flush failure" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1521,6 +1713,10 @@ EOF
 }
 
 @test "opt_periodic_maintenance skips when periodic command missing" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1541,6 +1737,10 @@ EOF
 }
 
 @test "execute_optimization dispatches periodic_maintenance" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1556,20 +1756,27 @@ EOF
 }
 
 @test "execute_optimization skips whitelisted task ids" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	local action="cache_refresh"
+	local health_name="Finder Cache Refresh"
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		action="ssd_trim"
+		health_name="SSD TRIM"
+	fi
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" WHITELISTED_ACTION="$action" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-is_whitelisted() { [[ "$1" == "cache_refresh" ]]; }
+is_whitelisted() { [[ "$1" == "$WHITELISTED_ACTION" ]]; }
 opt_cache_refresh() { echo "UNEXPECTED_CACHE"; }
+opt_ssd_trim() { echo "UNEXPECTED_SSD_TRIM"; }
 optimize_outcomes_reset
-execute_optimization cache_refresh
+execute_optimization "$WHITELISTED_ACTION"
 [[ "$(optimize_outcome_count skipped)" == "1" ]] || exit 1
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Skipped (whitelisted): Finder Cache Refresh"* ]] || return 1
-	[[ "$output" != *"UNEXPECTED_CACHE"* ]]
+	[[ "$output" == *"Skipped (whitelisted): ${health_name}"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_"* ]]
 }
 
 @test "optimize whitelist is loaded before system health checks" {
@@ -1632,9 +1839,14 @@ get_optimize_whitelist_items
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Permission Repair|disk_permissions_repair|optimize_task"* ]] || return 1
-	[[ "$output" == *"Login Items Audit|login_items_audit|optimize_task"* ]] || return 1
-	[[ "$output" == *"Legacy Overrides|legacy_overrides_audit|optimize_task"* ]] || return 1
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		[[ "$output" == *"Permission Repair|disk_permissions_repair|optimize_task"* ]] || return 1
+		[[ "$output" == *"Login Items Audit|login_items_audit|optimize_task"* ]] || return 1
+		[[ "$output" == *"Legacy Overrides|legacy_overrides_audit|optimize_task"* ]] || return 1
+	else
+		[[ "$output" == *"SSD TRIM|ssd_trim|optimize_task"* ]] || return 1
+		[[ "$output" == *"DNS Cache Flush|dns_cache_flush|optimize_task"* ]] || return 1
+	fi
 }
 
 @test "_login_item_app_exists finds nested helper app bundles" {
@@ -1658,6 +1870,10 @@ EOF
 }
 
 @test "_login_item_app_exists finds nested helper apps by bundle display name" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	local helper="$HOME/Applications/Adobe Acrobat DC.app/Contents/Helpers/AdobeResourceSynchronizer.app"
 	mkdir -p "$helper/Contents"
 	cat > "$helper/Contents/Info.plist" <<'PLIST'

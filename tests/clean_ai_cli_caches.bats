@@ -535,6 +535,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+
 note_activity() { :; }
 safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
 pgrep() { return 1; }
@@ -563,6 +564,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+
 note_activity() { :; }
 safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
 pgrep() { return 1; }
@@ -655,6 +657,7 @@ EOF
     run env HOME="$isolated_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
+
 old_cli="$HOME/Library/Application Support/Claude/claude-code/2.1.140"
 old_vm="$HOME/Library/Application Support/Claude/claude-code-vm/2.1.140"
 should_protect_path() { return 1; }
@@ -686,6 +689,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+
 root="$HOME/versions"
 newline_version=$'2.0\njunk'
 _plan_versioned_agent_cleanup_targets "$root" 1 "$root/3.0"
@@ -792,7 +796,12 @@ EOF
     mkdir -p "$versions_root/1.0" "$fake_bin"
     cat > "$fake_bin/find" <<'EOF'
 #!/bin/bash
-sleep 30
+for arg do
+    [[ "$arg" == */versions ]] || continue
+    sleep 30
+    exit
+done
+exec /usr/bin/find "$@"
 EOF
     chmod +x "$fake_bin/find"
 
@@ -863,6 +872,7 @@ EOF
     run env HOME="$isolated_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
+
 get_cleanup_path_size_kb() {
     rm -f "$HOME/.local/bin/claude"
     ln -s "$HOME/.local/share/claude/versions/1.0/claude" "$HOME/.local/bin/claude"
@@ -902,7 +912,7 @@ _versioned_agent_entry_mtime() {
         rm -f "$HOME/.local/bin/claude"
         ln -s "$HOME/.local/share/claude/versions/1.0/claude" "$HOME/.local/bin/claude"
     fi
-    command stat -f%m "$1"
+    command stat "${_MOLE_STAT_MTIME_FLAG}" "$1"
 }
 safe_remove() { echo "UNEXPECTED_DELETE:$1"; return 0; }
 clean_dev_ai_agents
@@ -927,6 +937,7 @@ EOF
     run env HOME="$isolated_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
+
 pgrep() {
     [[ -e "$HOME/claude-started" ]] && return 0
     return 1
@@ -961,6 +972,7 @@ EOF
     run env HOME="$isolated_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
+
 pgrep() { return 1; }
 get_cleanup_path_size_kb() {
     local active="$HOME/Library/Application Support/Claude/claude-code/2.1.150"
@@ -1003,7 +1015,7 @@ _versioned_agent_entry_mtime() {
         : > "$HOME/flipped-sdk-plan-race"
         echo "2.1.140" > "$HOME/Library/Application Support/Claude/claude-code-vm/.sdk-version"
     fi
-    command stat -f%m "$1"
+    command stat "${_MOLE_STAT_MTIME_FLAG}" "$1"
 }
 safe_remove() { echo "UNEXPECTED_DELETE:$1"; return 0; }
 clean_claude_desktop_bundled_versions 1
@@ -1029,6 +1041,7 @@ EOF
     run env HOME="$isolated_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
+
 pgrep() { return 1; }
 get_cleanup_path_size_kb() {
     mkdir -p "$1/com.apple.e5rt.e5bundlecache"
@@ -1115,6 +1128,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+
 note_activity() { :; }
 safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
 pgrep() {

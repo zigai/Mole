@@ -1,0 +1,3 @@
+#!/bin/bash
+# Stub gio for platform tests.
+exit 0

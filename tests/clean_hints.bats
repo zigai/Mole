@@ -199,6 +199,9 @@ EOT_NESTED
 }
 
 @test "show_user_launch_agent_hint_notice reports missing app-backed target" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     mkdir -p "$HOME/Library/LaunchAgents"
     cat > "$HOME/Library/LaunchAgents/com.example.stale.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -230,6 +233,9 @@ EOT4
 }
 
 @test "show_user_launch_agent_hint_notice trusts an existing executable Program target (#1262)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local updater="$HOME/Library/Application Support/Google/GoogleUpdater/GoogleUpdater.app/Contents/MacOS/GoogleUpdater"
     mkdir -p "$HOME/Library/LaunchAgents" "$(dirname "$updater")"
     touch "$updater"
@@ -279,6 +285,9 @@ EOT4A
 }
 
 @test "show_user_launch_agent_hint_notice gives Program precedence over ProgramArguments.0" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     mkdir -p "$HOME/Library/LaunchAgents"
     cat > "$HOME/Library/LaunchAgents/com.example.program-precedence.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

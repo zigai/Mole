@@ -1,0 +1,3 @@
+#!/bin/bash
+# uname stub reporting an unsupported kernel so the refusal path can be tested.
+printf 'SunOS\n'

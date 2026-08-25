@@ -352,17 +352,19 @@ EOF
 }
 
 @test "a custom whitelist still protects system caches and Poetry virtualenvs" {
-    # clean_user_essentials sweeps every child of ~/Library/Caches, and
+    # clean_user_essentials sweeps every child of the user cache root, and
     # load_mole_whitelist replaces DEFAULT_WHITELIST_PATTERNS wholesale once a
-    # user saves one entry of their own. Anything that breaks macOS search,
-    # fonts or iCloud, or that holds live interpreters rather than downloads,
-    # has to survive that replacement.
+    # user saves one entry of their own. The hard-safety entries have to
+    # survive that replacement on both platforms: macOS search/fonts/iCloud
+    # and Poetry's live interpreters on darwin, Mole's own XDG roots on linux.
     local test_home="$HOME/custom-whitelist-home"
-    mkdir -p "$test_home/.config/mole" \
-        "$test_home/Library/Caches/com.apple.spotlight" \
-        "$test_home/Library/Caches/com.apple.FontRegistry" \
-        "$test_home/Library/Caches/CloudKit" \
-        "$test_home/Library/Caches/pypoetry/virtualenvs/proj-abc123"
+    mkdir -p "$test_home/.config/mole"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        mkdir -p "$test_home/Library/Caches/com.apple.spotlight" \
+            "$test_home/Library/Caches/com.apple.FontRegistry" \
+            "$test_home/Library/Caches/CloudKit" \
+            "$test_home/Library/Caches/pypoetry/virtualenvs/proj-abc123"
+    fi
     printf '%s\n' "$test_home/.cache/keep-my-own-thing/*" > "$test_home/.config/mole/whitelist"
 
     run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" \
@@ -370,11 +372,22 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 load_mole_whitelist "$HOME"
-for probe in \
-    "$HOME/Library/Caches/com.apple.spotlight" \
-    "$HOME/Library/Caches/com.apple.FontRegistry" \
-    "$HOME/Library/Caches/CloudKit" \
-    "$HOME/Library/Caches/pypoetry/virtualenvs/proj-abc123"; do
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    probes=(
+        "$HOME/Library/Caches/com.apple.spotlight"
+        "$HOME/Library/Caches/com.apple.FontRegistry"
+        "$HOME/Library/Caches/CloudKit"
+        "$HOME/Library/Caches/pypoetry/virtualenvs/proj-abc123"
+    )
+else
+    # Linux hard safety set: Mole's cache and state roots must survive a
+    # wholesale whitelist replacement.
+    probes=(
+        "${XDG_CACHE_HOME:-$HOME/.cache}/mole"
+        "${XDG_STATE_HOME:-$HOME/.local/state}/mole"
+    )
+fi
+for probe in "${probes[@]}"; do
     if is_path_whitelisted "$probe"; then
         printf 'PROTECTED=%s\n' "${probe#"$HOME"/}"
     else
@@ -390,8 +403,13 @@ EOF
         echo "$output"
         return 1
     }
-    [[ "$output" == *"PROTECTED=Library/Caches/com.apple.spotlight"* ]] || return 1
-    [[ "$output" == *"PROTECTED=Library/Caches/pypoetry/virtualenvs/proj-abc123"* ]] || return 1
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        [[ "$output" == *"PROTECTED=Library/Caches/com.apple.spotlight"* ]] || return 1
+        [[ "$output" == *"PROTECTED=Library/Caches/pypoetry/virtualenvs/proj-abc123"* ]] || return 1
+    else
+        [[ "$output" == *"PROTECTED=.cache/mole"* ]] || return 1
+        [[ "$output" == *"PROTECTED=.local/state/mole"* ]] || return 1
+    fi
     [[ "$output" == *"CUSTOM_KEPT"* ]] || return 1
     rm -rf "$test_home"
 }
@@ -956,7 +974,15 @@ EOF
 }
 
 @test "clean_group_container_caches keeps protected caches and cleans non-protected caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+    # The SQLite in-use gate fails closed when lsof is missing, which would
+    # keep the non-protected cache.db on hosts without lsof. Stub it idle so
+    # the fixture deletion decision does not depend on the host toolchain.
+    local fake_bin="$HOME/fake-bin"
+    mkdir -p "$fake_bin"
+    printf '#!/bin/bash\nexit 1\n' > "$fake_bin/lsof"
+    chmod +x "$fake_bin/lsof"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false PATH="$fake_bin:$PATH" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1118,7 +1144,14 @@ EOF
 }
 
 @test "clean_group_container_caches respects whitelist entries" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+    # Same lsof stub as above: the SQLite gate fails closed without lsof,
+    # so drop.db would survive on hosts that lack it.
+    local fake_bin="$HOME/fake-bin"
+    mkdir -p "$fake_bin"
+    printf '#!/bin/bash\nexit 1\n' > "$fake_bin/lsof"
+    chmod +x "$fake_bin/lsof"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false PATH="$fake_bin:$PATH" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"

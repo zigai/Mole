@@ -1,0 +1,4 @@
+#!/bin/bash
+# Fake paccache for tests: records the invocation, exits successfully.
+printf 'paccache %s\n' "$*" >> "${MOLE_FAKE_TRACE:?MOLE_FAKE_TRACE not set}"
+exit 0

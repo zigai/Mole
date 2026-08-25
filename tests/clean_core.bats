@@ -830,6 +830,9 @@ SCRIPT
 }
 
 @test "mo clean summary separates tracked cleanup from free space change" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local mock_bin="$HOME/bin"
     mkdir -p "$mock_bin"
     cat > "$mock_bin/df" << 'MOCK'
@@ -935,6 +938,9 @@ EOF
 }
 
 @test "mo clean --dry-run reports stale login item without deleting it" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     mkdir -p "$HOME/Library/LaunchAgents"
     cat > "$HOME/Library/LaunchAgents/com.example.stale.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -978,6 +984,9 @@ PLIST
 }
 
 @test "mo clean --dry-run keeps container totals and preview paths consistent (#1282)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     # This assertion depends on an exact total. Give it a private HOME so
     # hidden directories left by earlier cases cannot add cleanup candidates.
     local test_home
@@ -1191,6 +1200,9 @@ SCRIPT
 }
 
 @test "custom whitelist without FINDER_METADATA still protects .DS_Store via safety merge (#1396)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     mkdir -p "$HOME/Documents" "$HOME/.config/mole"
     touch "$HOME/Documents/.DS_Store"
     # Pre-FINDER_METADATA user file: custom path only, no sentinel.
@@ -1282,6 +1294,9 @@ EOF
 }
 
 @test "_clean_mail_downloads removes old attachments" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     mkdir -p "$HOME/Library/Mail Downloads"
     touch "$HOME/Library/Mail Downloads/old.pdf"
     touch -t 202301010000 "$HOME/Library/Mail Downloads/old.pdf"
@@ -1306,6 +1321,9 @@ EOF
 }
 
 @test "_clean_mail_downloads uses dry-run wording and keeps attachments" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     mkdir -p "$HOME/Library/Mail Downloads"
     touch "$HOME/Library/Mail Downloads/old.pdf"
     touch -t 202301010000 "$HOME/Library/Mail Downloads/old.pdf"

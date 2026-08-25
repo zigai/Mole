@@ -206,11 +206,15 @@ EOF
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"U Update"* ]] || return 1
 
-	# TouchID setup takes precedence: no update shortcut even if one is ready.
-	run /bin/bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line false true"
-	[ "$status" -eq 0 ] || return 1
-	[[ "$output" == *"T TouchID"* ]] || return 1
-	[[ "$output" != *"U Update"* ]] || return 1
+	# TouchID setup takes precedence: no update shortcut even if one is
+	# ready. TouchID does not exist on linux, where the menu shows the
+	# update shortcut instead.
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		run /bin/bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line false true"
+		[ "$status" -eq 0 ] || return 1
+		[[ "$output" == *"T TouchID"* ]] || return 1
+		[[ "$output" != *"U Update"* ]] || return 1
+	fi
 }
 
 @test "show_main_menu keeps history out of the primary menu" {
@@ -339,6 +343,9 @@ EOF
 }
 
 @test "touchid status reports current configuration" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	run env HOME="$HOME" "$PROJECT_ROOT/mole" touchid status
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Touch ID"* ]]
@@ -365,7 +372,13 @@ EOF
 	[ "$status" -eq 0 ]
 	MOLE_OUTPUT="$output"
 
-	DEBUG_LOG="$HOME/Library/Logs/mole/mole_debug_session.log"
+	# Debug logs live under ~/Library/Logs on darwin and under
+	# XDG_STATE_HOME on linux.
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		DEBUG_LOG="$HOME/Library/Logs/mole/mole_debug_session.log"
+	else
+		DEBUG_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/mole/mole_debug_session.log"
+	fi
 	[ -f "$DEBUG_LOG" ]
 
 	run grep "Mole Debug Session" "$DEBUG_LOG"
@@ -384,10 +397,13 @@ EOF
 
 @test "mo clean --debug logs system info" {
 	mkdir -p "$HOME/.config/mole"
-	run env HOME="$HOME" TERM="xterm-256color" MOLE_TEST_MODE=1 MO_DEBUG=1 "$PROJECT_ROOT/mole" clean --dry-run
-	[ "$status" -eq 0 ]
-
-	DEBUG_LOG="$HOME/Library/Logs/mole/mole_debug_session.log"
+	# Debug logs live under ~/Library/Logs on darwin and under
+	# XDG_STATE_HOME on linux.
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		DEBUG_LOG="$HOME/Library/Logs/mole/mole_debug_session.log"
+	else
+		DEBUG_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/mole/mole_debug_session.log"
+	fi
 
 	run grep "User:" "$DEBUG_LOG"
 	[ "$status" -eq 0 ]
@@ -432,6 +448,10 @@ EOF
 }
 
 @test "touchid status reflects pam file contents" {
+	# pam_tid/pam_opendirectory are macOS PAM modules; linux has no TouchID.
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	pam_file="$HOME/pam_test"
 	cat >"$pam_file" <<'EOF'
 auth       sufficient     pam_opendirectory.so
@@ -451,6 +471,9 @@ EOF
 }
 
 @test "enable_touchid inserts pam_tid line in pam file" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	pam_file="$HOME/pam_enable"
 	cat >"$pam_file" <<'EOF'
 auth       sufficient     pam_opendirectory.so
@@ -466,6 +489,9 @@ EOF
 }
 
 @test "disable_touchid removes pam_tid line" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	pam_file="$HOME/pam_disable"
 	cat >"$pam_file" <<'EOF'
 auth       sufficient     pam_tid.so
@@ -482,6 +508,9 @@ EOF
 }
 
 @test "touchid enable --dry-run does not modify pam file" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	pam_file="$HOME/pam_enable_dry_run"
 	cat >"$pam_file" <<'EOF'
 auth       sufficient     pam_opendirectory.so
@@ -496,6 +525,9 @@ EOF
 }
 
 @test "enable_touchid sets correct file permissions on pam file" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	pam_file="$HOME/pam_perms_enable"
 	cat >"$pam_file" <<'EOF'
 auth       sufficient     pam_opendirectory.so
@@ -514,6 +546,9 @@ EOF
 }
 
 @test "disable_touchid sets correct file permissions on pam file" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	pam_file="$HOME/pam_perms_disable"
 	cat >"$pam_file" <<'EOF'
 auth       sufficient     pam_tid.so
@@ -532,6 +567,9 @@ EOF
 }
 
 @test "enable_touchid sets correct permissions on sudo_local file" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	pam_file="$HOME/pam_perms_sudolocal"
 	pam_local="$(dirname "$pam_file")/sudo_local_perms"
 	cat >"$pam_file" <<'EOF'

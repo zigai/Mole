@@ -1,0 +1,5 @@
+ID=endeavouros
+NAME="EndeavourOS"
+PRETTY_NAME="EndeavourOS"
+ID_LIKE="arch"
+BUILD_ID=rolling

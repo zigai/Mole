@@ -43,6 +43,10 @@ export -f load_installer_binary_helpers
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
+# The extracted installer functions read MOLE_PLATFORM; mirror the gate.
+MOLE_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+export MOLE_PLATFORM
+
 INSTALL_DIR="$HOME/install"
 CONFIG_DIR="$HOME/config"
 SOURCE_DIR="$HOME/source"
@@ -64,8 +68,8 @@ log_error() { echo "ERROR:$*"; }
 verify_release_attestation() { return 2; }
 
 content="verified-binary"
-asset="analyze-darwin-$(uname -m | sed 's/x86_64/amd64/')"
-hash=$(printf '%s' "$content" | shasum -a 256 | awk '{print $1}')
+asset="analyze-${MOLE_PLATFORM}-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+hash=$(printf '%s' "$content" | (shasum -a 256 2>/dev/null || sha256sum) | awk '{print $1}')
 
 curl() {
 	local out="" url=""
@@ -96,6 +100,10 @@ EOF
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
+# The extracted installer functions read MOLE_PLATFORM; mirror the gate.
+MOLE_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+export MOLE_PLATFORM
+
 INSTALL_DIR="$HOME/install"
 CONFIG_DIR="$HOME/config"
 SOURCE_DIR="$HOME/source"
@@ -115,8 +123,8 @@ verify_release_attestation() { return 2; }
 sleep() { :; }
 
 content="retried-binary"
-asset="analyze-darwin-$(uname -m | sed 's/x86_64/amd64/')"
-hash=$(printf '%s' "$content" | shasum -a 256 | awk '{print $1}')
+asset="analyze-${MOLE_PLATFORM}-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+hash=$(printf '%s' "$content" | (shasum -a 256 2>/dev/null || sha256sum) | awk '{print $1}')
 asset_attempts="$HOME/asset.attempts"
 checksum_attempts="$HOME/checksum.attempts"
 
@@ -162,6 +170,10 @@ EOF
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
+# The extracted installer functions read MOLE_PLATFORM; mirror the gate.
+MOLE_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+export MOLE_PLATFORM
+
 INSTALL_DIR="$HOME/install"
 CONFIG_DIR="$HOME/config"
 SOURCE_DIR="$HOME/source"
@@ -190,7 +202,7 @@ build_binary_from_source() {
 }
 get_latest_release_tag() { echo "V1.2.3"; }
 
-asset="status-darwin-$(uname -m | sed 's/x86_64/amd64/')"
+asset="status-${MOLE_PLATFORM}-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
 curl() {
 	local out="" url=""
 	while [[ $# -gt 0 ]]; do
@@ -229,6 +241,10 @@ EOF
 @test "download_binary preserves the installed helper when verification and rebuild fail (#1193)" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
+
+# The extracted installer functions read MOLE_PLATFORM; mirror the gate.
+MOLE_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+export MOLE_PLATFORM
 
 INSTALL_DIR="$HOME/install"
 CONFIG_DIR="$HOME/config"
@@ -285,6 +301,10 @@ EOF
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
+# The extracted installer functions read MOLE_PLATFORM; mirror the gate.
+MOLE_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+export MOLE_PLATFORM
+
 INSTALL_DIR="$HOME/install"
 CONFIG_DIR="$HOME/config"
 SOURCE_DIR="$HOME/source"
@@ -312,8 +332,8 @@ build_binary_from_source() {
 }
 get_latest_release_tag() { echo "V1.2.3"; }
 
-asset="analyze-darwin-$(uname -m | sed 's/x86_64/amd64/')"
-hash=$(printf 'release-binary' | shasum -a 256 | awk '{print $1}')
+asset="analyze-${MOLE_PLATFORM}-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+hash=$(printf 'release-binary' | (shasum -a 256 2>/dev/null || sha256sum) | awk '{print $1}')
 curl() {
 	local out="" url=""
 	while [[ $# -gt 0 ]]; do
@@ -346,6 +366,10 @@ EOF
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
+# The extracted installer functions read MOLE_PLATFORM; mirror the gate.
+MOLE_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+export MOLE_PLATFORM
+
 INSTALL_DIR="$HOME/install"
 CONFIG_DIR="$HOME/config"
 SOURCE_DIR="$HOME/source"
@@ -369,7 +393,7 @@ build_binary_from_source() {
 }
 get_latest_release_tag() { echo "V1.2.3"; }
 
-asset="status-darwin-$(uname -m | sed 's/x86_64/amd64/')"
+asset="status-${MOLE_PLATFORM}-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
 curl() {
 	local out="" url=""
 	while [[ $# -gt 0 ]]; do
@@ -404,6 +428,10 @@ EOF
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
+# The extracted installer functions read MOLE_PLATFORM; mirror the gate.
+MOLE_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+export MOLE_PLATFORM
+
 INSTALL_DIR="$HOME/install"
 CONFIG_DIR="$HOME/config"
 SOURCE_DIR="$HOME/source"
@@ -424,8 +452,8 @@ get_latest_release_tag() { echo "V1.2.2"; }
 verify_release_attestation() { return 2; }
 
 content="fallback-binary"
-asset="status-darwin-$(uname -m | sed 's/x86_64/amd64/')"
-hash=$(printf '%s' "$content" | shasum -a 256 | awk '{print $1}')
+asset="status-${MOLE_PLATFORM}-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+hash=$(printf '%s' "$content" | (shasum -a 256 2>/dev/null || sha256sum) | awk '{print $1}')
 curl() {
 	local out="" url=""
 	while [[ $# -gt 0 ]]; do
@@ -455,6 +483,10 @@ EOF
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
+# The extracted installer functions read MOLE_PLATFORM; mirror the gate.
+MOLE_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+export MOLE_PLATFORM
+
 INSTALL_DIR="$HOME/install"
 CONFIG_DIR="$HOME/config"
 SOURCE_DIR="$HOME/source"
@@ -481,8 +513,8 @@ build_binary_from_source() {
 	return 0
 }
 
-asset="status-darwin-$(uname -m | sed 's/x86_64/amd64/')"
-good_hash=$(printf 'expected-binary' | shasum -a 256 | awk '{print $1}')
+asset="status-${MOLE_PLATFORM}-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+good_hash=$(printf 'expected-binary' | (shasum -a 256 2>/dev/null || sha256sum) | awk '{print $1}')
 curl() {
 	local out="" url=""
 	while [[ $# -gt 0 ]]; do
@@ -753,6 +785,13 @@ EOF
 }
 
 @test "standalone installer serializes writers with the stable install lock" {
+	# The flow under test is built on macOS-only tooling: `chmod +a` ACLs,
+	# `ls -lde` ACL listings and an external holder driven by
+	# /usr/bin/lockf. The linux lock contract (mkdir fallback, prefix
+	# normalization) is covered by the two lock tests below.
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 INSTALL_DIR="$HOME/install/bin"
@@ -953,6 +992,10 @@ EOF
 @test "standalone installer normalizes a relative prefix before lock validation" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
+
+# The extracted installer functions read MOLE_PLATFORM; mirror the gate.
+MOLE_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+export MOLE_PLATFORM
 cd "$HOME"
 INSTALL_DIR="relative/bin"
 mkdir -p "$INSTALL_DIR"
@@ -964,8 +1007,19 @@ eval "$(sed -n '/^normalize_install_dir() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
 normalize_install_dir
 [[ "$INSTALL_DIR" == "$(pwd -P)/relative/bin" ]] || exit 1
 if install_lock_has_unsafe_ancestor false; then
-    echo "UNEXPECTED_RELATIVE_PREFIX_REJECTED_AFTER_NORMALIZATION"
-    exit 1
+    # A refusal is only legitimate when some ancestor ABOVE the prefix is
+    # genuinely world-writable on this host (e.g. a checkout under /tmp);
+    # the normalized prefix itself must never be the culprit.
+    case "$INSTALL_LOCK_UNSAFE_ANCESTOR" in
+        "$HOME"/relative/bin | "$HOME")
+            echo "UNEXPECTED_RELATIVE_PREFIX_REJECTED_AFTER_NORMALIZATION"
+            exit 1
+            ;;
+    esac
+    [[ "$INSTALL_LOCK_UNSAFE_ANCESTOR_REASON" == "writable" ]] || {
+        echo "UNEXPECTED_REASON:$INSTALL_LOCK_UNSAFE_ANCESTOR_REASON"
+        exit 1
+    }
 fi
 EOF
 
@@ -1027,10 +1081,10 @@ set -euo pipefail
 eval "$(sed -n '/^source_archive_url()/,/^}/p' "$PROJECT_ROOT/install.sh")"
 
 commit="0123456789abcdef0123456789abcdef01234567"
-[[ "$(source_archive_url main "$commit")" == "https://github.com/tw93/mole/archive/$commit.tar.gz" ]] || exit 1
-[[ "$(source_archive_url main "")" == "https://github.com/tw93/mole/archive/refs/heads/main.tar.gz" ]] || exit 1
-[[ "$(source_archive_url dev "")" == "https://github.com/tw93/mole/archive/refs/heads/dev.tar.gz" ]] || exit 1
-[[ "$(source_archive_url V1.2.3 "")" == "https://github.com/tw93/mole/archive/refs/tags/V1.2.3.tar.gz" ]] || exit 1
+[[ "$(source_archive_url main "$commit")" == "https://github.com/zigai/Mole/archive/$commit.tar.gz" ]] || exit 1
+[[ "$(source_archive_url main "")" == "https://github.com/zigai/Mole/archive/refs/heads/main.tar.gz" ]] || exit 1
+[[ "$(source_archive_url dev "")" == "https://github.com/zigai/Mole/archive/refs/heads/dev.tar.gz" ]] || exit 1
+[[ "$(source_archive_url V1.2.3 "")" == "https://github.com/zigai/Mole/archive/refs/tags/V1.2.3.tar.gz" ]] || exit 1
 EOF
 
 	[ "$status" -eq 0 ] || {
@@ -1109,7 +1163,7 @@ log_error() { echo "ERROR:$*"; }
 asset="status-darwin-amd64"
 file="$(mktemp "${TMPDIR:-/tmp}/mole-asset.XXXXXX")"
 printf 'release-binary' > "$file"
-hash="$(printf 'release-binary' | shasum -a 256 | awk '{print $1}')"
+hash="$(printf 'release-binary' | (shasum -a 256 2>/dev/null || sha256sum) | awk '{print $1}')"
 download_release_checksums() { printf '%s  %s\n' "$hash" "$asset" > "$2"; return 0; }
 
 # attestation verification failed (status 1) -> fatal, never installs
@@ -1178,13 +1232,14 @@ eval "$(sed -n '/^safe_rm() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
 # Anchor on the assignment, not the phrase: a comment that merely mentions
 # `mktemp -d` would otherwise be picked up and eval'd to nothing.
 mktemp_line=$(grep -m1 -E '^[[:space:]]*tmp="\$\(mktemp -d' "$PROJECT_ROOT/install.sh" | sed 's/^[[:space:]]*//')
-[[ -n "$mktemp_line" ]] || { echo "NO_MKTEMP_LINE"; exit 1; }
-
-for scenario in unset darwin slash; do
+for scenario in unset custom slash; do
     case "$scenario" in
         unset)  unset TMPDIR ;;
-        darwin) TMPDIR="$(getconf DARWIN_USER_TEMP_DIR)"; export TMPDIR ;;
-        slash)  TMPDIR="$(getconf DARWIN_USER_TEMP_DIR)"; TMPDIR="${TMPDIR%/}/"; export TMPDIR ;;
+        custom)
+            # getconf DARWIN_USER_TEMP_DIR only exists on darwin; any
+            # writable dir exercises TMPDIR honoring on linux.
+            TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/mole-tmpdir.XXXXXX")"; export TMPDIR ;;
+        slash)  TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/mole-tmpdir.XXXXXX")"; TMPDIR="${TMPDIR%/}/"; export TMPDIR ;;
     esac
     eval "$mktemp_line"
     [[ -d "$tmp" ]] || { echo "NO_DIR:$scenario"; exit 1; }
@@ -1206,6 +1261,10 @@ EOF
 	# the check at a path that cannot exist.
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
+
+# The extracted installer functions read MOLE_PLATFORM; mirror the gate.
+MOLE_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+export MOLE_PLATFORM
 patched="$HOME/install-nolockf.sh"
 sed 's#/usr/bin/lockf#/usr/bin/lockf_absent_for_test#g' "$PROJECT_ROOT/install.sh" > "$patched"
 
@@ -1226,6 +1285,21 @@ for fn in install_lock_command install_lock_has_unsafe_ancestor install_lock_pre
 	eval "$body"
 done
 
+# Hosts whose HOME tree sits below a world-writable ancestor (e.g. a
+# checkout under /tmp) are refused by install_lock_has_unsafe_ancestor
+# before the lockf-absence fallback can run; that refusal is the
+# documented contract, so exercise the fallback matrix only where the
+# layout permits.
+if install_lock_has_unsafe_ancestor false; then
+    if [[ "$INSTALL_LOCK_UNSAFE_ANCESTOR_REASON" == "writable" &&
+        "$INSTALL_LOCK_UNSAFE_ANCESTOR" != "$INSTALL_DIR" ]]; then
+        printf 'SKIP_WORLD_WRITABLE_ANCESTOR:%s\n' "$INSTALL_LOCK_UNSAFE_ANCESTOR"
+        exit 0
+    fi
+    echo "UNEXPECTED_UNSAFE_PREFIX:$INSTALL_LOCK_UNSAFE_ANCESTOR"
+    exit 1
+fi
+
 acquire_install_lock || { echo "ACQUIRE_FAILED:$INSTALL_LOCK_FAILURE"; exit 1; }
 mutex="$INSTALL_DIR/.mole-update.lock/holder"
 [[ -d "$mutex" ]] || { echo "NO_MUTEX_HELD"; exit 1; }
@@ -1244,6 +1318,9 @@ EOF
 		echo "$output"
 		return 1
 	}
+	if [[ "$output" == *"SKIP_WORLD_WRITABLE_ANCESTOR:"* ]]; then
+		skip "host layout taints the ancestor walk: ${output#*SKIP_WORLD_WRITABLE_ANCESTOR:}"
+	fi
 	[[ "$output" != *"DOUBLE_ACQUIRE"* ]] || return 1
 	[[ "$output" != *"MUTEX_LEAKED"* ]] || return 1
 }

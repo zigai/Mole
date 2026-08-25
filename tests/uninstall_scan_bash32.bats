@@ -23,6 +23,12 @@ setup_file() {
 }
 
 setup() {
+	# Every test here exercises macOS .app bundle scanning: mdls/Spotlight
+	# metadata, pkgutil receipts and /bin/bash 3.2 quirks. Linux app
+	# discovery has its own coverage under tests/linux_apps_*.bats.
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	HOME="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-scan-bash32.XXXXXX")"
 	export HOME
 	# Safety: refuse to operate on a real home directory.

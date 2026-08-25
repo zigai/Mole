@@ -15,6 +15,10 @@ teardown_file() {
 }
 
 @test "cache refresh reports a failed cache removal" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$TEST_HOME/cache" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -35,6 +39,10 @@ EOF
 }
 
 @test "cache refresh reports failed rebuild commands" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$TEST_HOME/cache-command" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -53,6 +61,10 @@ EOF
 }
 
 @test "saved state cleanup reports a failed removal" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$TEST_HOME/saved-state" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -74,6 +86,10 @@ EOF
 }
 
 @test "launch agent cleanup reports a failed removal" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$TEST_HOME/launch-agent" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -94,6 +110,10 @@ EOF
 }
 
 @test "shared file list repair reports a failed removal" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$TEST_HOME/shared-list" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -114,6 +134,10 @@ EOF
 }
 
 @test "CoreDuet cleanup reports a failed sidecar removal" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$TEST_HOME/coreduet" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -135,6 +159,10 @@ EOF
 }
 
 @test "CoreDuet cleanup preserves sidecars when sqlite3 is unavailable" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
+
 	run env HOME="$TEST_HOME/coreduet-unavailable" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"

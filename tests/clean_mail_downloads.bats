@@ -142,6 +142,9 @@ EOF
 }
 
 @test "mo clean completes when the Mail Downloads du stalls (#1344)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "stubs macOS-only clean sections"
+    fi
     mkdir -p "$HOME/Library/Caches"
     mkdir -p "$HOME/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"
     echo x > "$HOME/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/old.docx"

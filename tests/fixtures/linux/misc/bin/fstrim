@@ -1,0 +1,6 @@
+#!/bin/bash
+# Test fixture: fake fstrim. Records invocation to MOLE_FIXTURE_MARKER when set.
+if [[ -n "${MOLE_FIXTURE_MARKER:-}" ]]; then
+    printf 'fstrim %s\n' "$*" >> "$MOLE_FIXTURE_MARKER"
+fi
+exit 0

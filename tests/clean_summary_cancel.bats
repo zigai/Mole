@@ -39,7 +39,7 @@ setup() {
 
 run_perform_cleanup_with() {
     export SECTION_RC="$1"
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=darwin \
         /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
@@ -89,7 +89,7 @@ EOF
 }
 
 @test "run with removal timeouts completes and reports them (#1384)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=darwin \
         /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
@@ -120,9 +120,8 @@ EOF
     mkdir -p "$HOME/Library/Caches/cache1374"
     printf x > "$HOME/Library/Caches/cache1374/file.bin"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=darwin \
         /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 # Stub every section so perform_cleanup never scans the real machine.
 # run_with_shell_timeout is stubbed too: its shell-fallback killer process

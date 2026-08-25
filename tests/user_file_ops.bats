@@ -33,6 +33,15 @@ setup() {
     mkdir -p "$HOME"
 }
 
+# stat ownership flags differ per platform (BSD -f vs GNU -c).
+_mole_test_stat_uid() {
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        /usr/bin/stat -f%u "$1"
+    else
+        /usr/bin/stat -c%u "$1"
+    fi
+}
+
 @test "is_root_user detects non-root correctly" {
     result=$(/bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; is_root_user && echo 'root' || echo 'not-root'")
     [ "$result" = "not-root" ]
@@ -270,7 +279,7 @@ EOF
     /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
 
     current_uid=$(id -u)
-    dir_uid=$(/usr/bin/stat -f%u "$test_dir")
+    dir_uid=$(_mole_test_stat_uid "$test_dir")
     [ "$dir_uid" = "$current_uid" ]
 }
 
@@ -312,7 +321,7 @@ EOF
     /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$test_file'"
 
     current_uid=$(id -u)
-    file_uid=$(/usr/bin/stat -f%u "$test_file")
+    file_uid=$(_mole_test_stat_uid "$test_file")
     [ "$file_uid" = "$current_uid" ]
 }
 
@@ -324,7 +333,7 @@ EOF
     [ -d "$test_dir" ]
 
     current_uid=$(id -u)
-    dir_uid=$(/usr/bin/stat -f%u "$test_dir")
+    dir_uid=$(_mole_test_stat_uid "$test_dir")
     [ "$dir_uid" = "$current_uid" ]
 }
 

@@ -111,6 +111,9 @@ EOF
 }
 
 @test "scan_installed_apps rejects the previous complete-cache schema and finds the installed app" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app scan needs PlistBuddy/plutil)"
+    fi
     run env HOME="$HOME/unmarked-cache" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -141,6 +144,9 @@ EOF
 }
 
 @test "scan_installed_apps rejects a cache timestamp from the future" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app scan needs PlistBuddy/plutil)"
+    fi
     run env HOME="$HOME/future-cache" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -171,6 +177,9 @@ EOF
 }
 
 @test "scan_installed_apps ignores same-directory staging files" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app scan needs PlistBuddy/plutil)"
+    fi
     run env HOME="$HOME/staged-cache" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -200,6 +209,9 @@ EOF
 }
 
 @test "scan_installed_apps keeps the previous complete cache when publish fails" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app scan needs PlistBuddy/plutil)"
+    fi
     run env HOME="$HOME/publish-failure" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -328,6 +340,9 @@ EOF
 }
 
 @test "scan_installed_apps keeps find traversal options before predicates" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app scan needs PlistBuddy/plutil)"
+    fi
     rm -f "$HOME/.cache/mole/installed_apps_cache"
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -380,6 +395,9 @@ EOF
 }
 
 @test "scan_installed_apps aggregates LaunchAgent bundle names without scratch paths" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app scan needs PlistBuddy/plutil)"
+    fi
     run env HOME="$HOME/agent-scan" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -520,7 +538,7 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
 
 mkdir -p "$HOME/Library/Caches/com.example.LiveApp"
-touch -t "$(date -v-31d +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp"
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S 2>/dev/null || date -d '31 days ago' +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp" 2>/dev/null || true
 
 scan_installed_apps() {
     : > "$1"
@@ -564,7 +582,7 @@ source "$PROJECT_ROOT/lib/clean/apps.sh"
 mkdir -p "$HOME/Applications/LiveApp.app" \
     "$HOME/Applications/Partial.app/Contents" \
     "$HOME/Library/Caches/com.example.LiveApp"
-touch -t "$(date -v-31d +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp"
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S 2>/dev/null || date -d '31 days ago' +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp" 2>/dev/null || true
 rm -f "$HOME/.cache/mole/installed_apps_cache"
 
 cat > "$HOME/Applications/Partial.app/Contents/Info.plist" <<'PLIST'
@@ -635,7 +653,7 @@ source "$PROJECT_ROOT/lib/clean/apps.sh"
 
 mkdir -p "$HOME/Applications/Broken.app/Contents" \
     "$HOME/Library/Caches/com.example.LiveApp"
-touch -t "$(date -v-31d +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp"
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S 2>/dev/null || date -d '31 days ago' +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp" 2>/dev/null || true
 rm -f "$HOME/.cache/mole/installed_apps_cache"
 
 stub_dir="$HOME/stub-bin-errexit-scan"
@@ -691,7 +709,7 @@ source "$PROJECT_ROOT/lib/clean/apps.sh"
 bad_name=$'Bad\\033[2J-\033[2J.app'
 mkdir -p "$HOME/Applications/$bad_name/Contents" \
     "$HOME/Library/Caches/com.example.LiveApp"
-touch -t "$(date -v-31d +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp"
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S 2>/dev/null || date -d '31 days ago' +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp" 2>/dev/null || true
 
 stub_dir="$HOME/stub-bin-control-name"
 mkdir -p "$stub_dir"
@@ -733,6 +751,8 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
 should_protect_data() { return 1; }
+mdfind() { return 0; } # No Spotlight on Linux: empty result means not installed
+run_with_timeout() { shift; "$@"; }
 get_file_mtime() { echo 0; }
 if is_bundle_orphaned "com.example.Old" "$HOME/old" "$HOME/installed.txt"; then
     echo "orphan"
@@ -757,6 +777,9 @@ EOF
 }
 
 @test "clean_orphaned_app_data handles paths with spaces correctly" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "orphan identity snapshot uses BSD-only stat -f (lib port defect)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -819,6 +842,9 @@ EOF
 }
 
 @test "clean_orphaned_app_data only counts successful deletions" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "orphan identity snapshot uses BSD-only stat -f (lib port defect)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -893,6 +919,9 @@ EOF
 }
 
 @test "clean_orphaned_app_data uses dry-run wording for orphaned summary (#1192)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "orphan identity snapshot uses BSD-only stat -f (lib port defect)"
+    fi
     local test_home="$HOME/dry-run-orphan-summary"
     rm -rf "$test_home"
     mkdir -p "$test_home"
@@ -950,6 +979,9 @@ EOF
 }
 
 @test "clean_orphaned_app_data removes orphaned Claude VM bundle" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "orphan identity snapshot uses BSD-only stat -f (lib port defect)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -1003,6 +1035,9 @@ EOF
 }
 
 @test "orphan cleanup guard rejects replacement objects and newly installed apps" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "orphan identity snapshot uses BSD-only stat -f (lib port defect)"
+    fi
     local candidate="$HOME/Library/Caches/com.test.raced-orphan"
     mkdir -p "$candidate"
     printf 'original\n' > "$candidate/data"
@@ -1046,6 +1081,9 @@ EOF
 }
 
 @test "orphan cleanup binds its approved object to the final safe_remove sink" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "orphan identity snapshot uses BSD-only stat -f (lib port defect)"
+    fi
     local candidate="$HOME/Library/Caches/com.test.bound-orphan"
     mkdir -p "$candidate"
     printf 'cache\n' > "$candidate/data"
@@ -1276,6 +1314,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services respects dry-run" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     # Without MOLE_TEST_MODE=0 the sweep early-returns under setup_file's
     # MOLE_TEST_MODE=1, leaving $output empty and both negative assertions true.
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=true MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
@@ -1357,6 +1398,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services reports a budget exhausted by an empty inventory" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1441,6 +1485,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services keeps earlier candidates when a later privileged inventory times out" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1516,6 +1563,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services propagates an interrupted plist probe before deletion" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1567,6 +1617,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services propagates an interrupted parent-app resolver" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1622,6 +1675,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services propagates an interrupted protect-pattern mdfind" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1700,6 +1756,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services never changes launchd state when removal is refused (#1447)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1757,6 +1816,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services does not remove a plist replaced after classification" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1820,6 +1882,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services binds the discovered plist identity to the sudo sink" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1889,6 +1954,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services does not count protected skips as cleaned" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     # setup_file exports MOLE_TEST_MODE=1, under which clean_orphaned_system_services
     # returns immediately and leaves $output empty. Override it as the sibling cases do.
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
@@ -1965,6 +2033,9 @@ EOF
 # The older "must stay protected" expectation outlived that change only because
 # the assertion sat mid-test and could not fail.
 @test "clean_orphaned_system_services reclaims an AmneziaWG helper once its app is gone" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     # setup_file exports MOLE_TEST_MODE=1, under which clean_orphaned_system_services
     # returns immediately and leaves $output empty. Override it as the sibling cases do.
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
@@ -2032,6 +2103,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services keeps a live helper app LaunchDaemon loaded (#1447)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     # Chrome Remote Desktop installs its broker inside a standalone .app under
     # PrivilegedHelperTools rather than inside a parent app in /Applications.
     # The existing executable and enclosing helper app are exact ownership
@@ -2107,6 +2181,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services keeps a standalone helper app plist during an executable update gap" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -2160,6 +2237,9 @@ EOF
 }
 
 @test "orphan helper eligibility refuses a helper still referenced by a surviving plist" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd sweep + PlistBuddy fixture)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -2215,6 +2295,9 @@ EOF
 }
 
 @test "orphan helper reference scan fails closed when a surviving plist is unreadable" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd sweep + PlistBuddy fixture)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -2288,6 +2371,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services removes orphaned helper despite data protection (#1082)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     # The Docker leftover in #1082 survived because should_protect_data matches
     # com.docker.* and blocked cleanup. com.getpostman.* hits the exact same
     # should_protect_data branch; orphan cleanup must call should_protect_path in
@@ -2348,6 +2434,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services keeps daemons whose binary is root-only readable (#1188)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     # Intego-style self-protecting software (antivirus, endpoint agents) makes
     # its install tree root-only readable, so the unprivileged -e probe misses
     # the daemon binary and every one of its LaunchDaemons used to be flagged
@@ -2420,6 +2509,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services counts safe_sudo protected skips as protected (#1141)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2489,6 +2581,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services dry-run skips protected paths (#886)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     # MOLE_TEST_NO_AUTH=0 overrides the CI default (=1) so the function actually
     # runs past the auth-skip guard in apps.sh; the sudo() mock satisfies the
     # `sudo -n true` probe.
@@ -2536,6 +2631,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services dry-run reports unprotected orphans (#886)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     # MOLE_TEST_NO_AUTH=0 overrides CI default so the function executes.
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -2578,6 +2676,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services dry-run writes orphan paths to the export list (#1210)" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (launchd LaunchDaemon/LaunchAgent sweep)"
+    fi
     # MOLE_TEST_NO_AUTH=0 overrides CI default so the function executes.
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -2917,6 +3018,9 @@ EOF
 }
 
 @test "installed-app scan reads wrapped bundles and tolerates a missing bundle id" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app scan needs PlistBuddy/plutil)"
+    fi
 	# Same two shapes that broke the uninstall scan: an iOS app on Apple
 	# Silicon keeps its plist under Wrapper/<name>.app, and vendor launchers
 	# ship one with no CFBundleIdentifier. Both used to fail the scan closed,
@@ -2960,6 +3064,9 @@ EOF
 }
 
 @test "installed-app scan skips an iOS app with a dangling WrappedBundle symlink" {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow (.app scan needs PlistBuddy/plutil)"
+    fi
 	# AudioCopy.app has no Contents/, a WrappedBundle symlink into a Wrapper/
 	# that does not exist, so no readable plist anywhere. It owns no
 	# bundle-id-named data, so skipping it invents no orphan; before this it

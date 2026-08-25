@@ -82,6 +82,11 @@ EOF
 }
 
 @test "mole_delete trash mode moves the target instead of rm -rf" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local victim="$SANDBOX/victim_trash"
     mkdir -p "$victim"
     printf 'payload' > "$victim/data.txt"
@@ -99,6 +104,11 @@ EOF
 }
 
 @test "mole_delete moves sudo-required paths to invoking user Trash" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local victim="$SANDBOX/victim_sudo_trash"
     local fake_bin="$SANDBOX/bin"
     local fake_home="$SANDBOX/home"
@@ -168,6 +178,11 @@ EOF
 }
 
 @test "mole_delete refuses symlinked invoking user Trash for sudo-required paths" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local victim="$SANDBOX/victim_sudo_symlink_trash"
     local fake_bin="$SANDBOX/bin"
     local fake_home="$SANDBOX/home"
@@ -211,6 +226,11 @@ EOF
 }
 
 @test "mole_delete uses unique Trash name for sudo-required path conflicts" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local victim="$SANDBOX/conflict_app"
     local fake_bin="$SANDBOX/bin"
     local fake_home="$SANDBOX/home"
@@ -259,6 +279,11 @@ EOF
 }
 
 @test "sudo Trash preserves staged payload without privileged rollback after handoff" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local victim="$SANDBOX/recovery_app"
     local fake_home="$SANDBOX/home"
     local stage="$SANDBOX/recovery-stage"
@@ -402,6 +427,11 @@ EOF
 }
 
 @test "Trash mode preserves mutable-parent classification when the second path probe catches a race" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local victim="$SANDBOX/RacedRootOwned.app"
     local fake_home="$SANDBOX/race-home"
     mkdir -p "$victim" "$fake_home"
@@ -528,6 +558,11 @@ EOF
 }
 
 @test "normal app data uses direct Trash with a unique name and mode 0700" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local fake_home="$SANDBOX/home"
     local victim="$fake_home/Library/Containers/com.microsoft.Word"
     local existing="$fake_home/.Trash/com.microsoft.Word"
@@ -563,6 +598,11 @@ EOF
 }
 
 @test "normal direct Trash refuses a symlinked invoking user Trash" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local fake_home="$SANDBOX/home"
     local victim="$fake_home/Library/Application Scripts/com.microsoft.Word"
     local redirected="$SANDBOX/redirected"
@@ -585,6 +625,11 @@ EOF
 }
 
 @test "direct Trash reports TCC denial and never falls back to permanent delete" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local fake_home="$SANDBOX/home"
     local victim="$fake_home/Library/Containers/com.microsoft.Word"
     local trace="$SANDBOX/privacy-denied.log"
@@ -632,6 +677,11 @@ EOF
 }
 
 @test "direct Trash recognizes lowercase permission denied" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local fake_home="$SANDBOX/home"
     local victim="$fake_home/Library/Group Containers/UBF8T346G9.Office"
     mkdir -p "$victim"
@@ -659,6 +709,11 @@ EOF
 }
 
 @test "direct Trash generic failure stays closed" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local fake_home="$SANDBOX/home"
     local victim="$fake_home/Library/Application Scripts/com.microsoft.Word"
     local trace="$SANDBOX/generic-failure.log"
@@ -957,6 +1012,11 @@ EOF
 }
 
 @test "mole_delete trash failure leaves target in place" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local victim="$SANDBOX/fallback_target"
     : > "$victim"
 
@@ -985,6 +1045,11 @@ EOF
 }
 
 @test "mole_delete warns once for repeated Trash failures" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local first="$SANDBOX/trash_fail_first"
     local second="$SANDBOX/trash_fail_second"
     : > "$first"
@@ -1079,6 +1144,11 @@ EOF
 }
 
 @test "mole_delete preserves an interrupted Trash action in its return code and forensic log" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local victim="$SANDBOX/interrupted-trash-action"
     mkdir -p "$victim"
 
@@ -1108,12 +1178,21 @@ EOF
     mkdir -p "$victim"
     printf 'original\n' > "$victim/data"
 
+    # stat(1) identity flags differ per platform; resolve them here the
+    # same way base.sh does instead of relying on _mole_snapshot_path_identity,
+    # whose GNU stat handling is broken (see REALBUGS).
+    local expected_parent expected_parent_id expected_target_id
+    expected_parent="$(cd -P "$parent" && pwd -P)"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        expected_parent_id="$(stat -f '%d:%i' "$expected_parent")"
+        expected_target_id="$(stat -f '%d:%i' "$victim")"
+    else
+        expected_parent_id="$(stat -c '%d:%i' "$expected_parent")"
+        expected_target_id="$(stat -c '%d:%i' "$victim")"
+    fi
+
     run /bin/bash --noprofile --norc <<EOF
 $(prelude)
-_mole_snapshot_path_identity "$victim"
-expected_parent="\$_MOLE_PATH_SNAPSHOT_PARENT"
-expected_parent_id="\$_MOLE_PATH_SNAPSHOT_PARENT_ID"
-expected_target_id="\$_MOLE_PATH_SNAPSHOT_TARGET_ID"
 
 mv "$parent" "$parent.original"
 mkdir -p "$victim"
@@ -1121,7 +1200,7 @@ printf 'replacement\n' > "$victim/data"
 
 rc=0
 safe_remove "$victim" true 1 "" \
-    "\$expected_parent" "\$expected_parent_id" "\$expected_target_id" || rc=\$?
+    "$expected_parent" "$expected_parent_id" "$expected_target_id" || rc=\$?
 [[ \$rc -ne 0 ]] || exit 1
 [[ -f "$victim/data" && -f "$parent.original/victim/data" ]]
 EOF
@@ -1172,13 +1251,17 @@ EOF
     run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 export MOLE_DELETE_MODE=permanent
-expected_identity=\$("\$STAT_BSD" -f%d:%i:%m "$victim")
+expected_identity=\$("\$STAT_BSD" "\$_MOLE_STAT_ID_MTIME_FLAG" "$victim")
 eval "\$(declare -f _mole_snapshot_path_identity | sed '1s/_mole_snapshot_path_identity/_real_mole_snapshot_path_identity/')"
 _mole_snapshot_path_identity() {
-    _real_mole_snapshot_path_identity "\$1" || return \$?
+    local snap_rc=0
+    _real_mole_snapshot_path_identity "\$1" || snap_rc=\$?
+    # Swap even when the probe failed so the refusal contract is exercised
+    # on every platform (a broken identity probe must still fail closed).
     mv "\$1" "\$1.original"
     mkdir -p "\$1"
     printf 'replacement\n' > "\$1/data"
+    return "\$snap_rc"
 }
 safe_remove() {
     printf 'UNEXPECTED_REMOVE:%s\n' "\$1"
@@ -1199,6 +1282,11 @@ EOF
 }
 
 @test "Finder fallback refuses an app replaced after direct Trash denial" {
+    # The macOS Trash flow (user ~/.Trash, Finder, TCC diagnosis) is
+    # darwin-only; linux trash routing is covered by linux_fileops_delete.bats.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     local victim="$SANDBOX/Raced.app"
     local trace="$SANDBOX/raced-finder.log"
     mkdir -p "$victim"

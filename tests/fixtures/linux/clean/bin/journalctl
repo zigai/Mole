@@ -1,0 +1,4 @@
+#!/bin/bash
+# Fake journalctl for tests: records the invocation, exits successfully.
+printf 'journalctl %s\n' "$*" >> "${MOLE_FAKE_TRACE:?MOLE_FAKE_TRACE not set}"
+exit 0

@@ -2,21 +2,30 @@
 
 setup_file() {
 	PROJECT_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
-	export PROJECT_ROOT
+	# Post-install verification binds its update lock to the fake install dir
+	# and refuses world-writable ancestors (a sticky 1777 /tmp among them).
+	# A checkout under /tmp would therefore fail every sandboxed install
+	# placed beneath the test dirname, so anchor the sandbox under the
+	# invoking user's home, whose ancestor chain is user/root-owned and clean.
+	SANDBOX_BASE="${HOME:-}"
+	if [[ -z "$SANDBOX_BASE" || ! -d "$SANDBOX_BASE" || ! -w "$SANDBOX_BASE" ]]; then
+		SANDBOX_BASE="$BATS_TEST_DIRNAME"
+	fi
+	export PROJECT_ROOT SANDBOX_BASE
 }
 
 setup() {
-	HOME="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-update-home.XXXXXX")"
-	TEST_ROOT="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-update-case.XXXXXX")"
+	HOME="$(mktemp -d "${SANDBOX_BASE}/.mole-update-home.XXXXXX")"
+	TEST_ROOT="$(mktemp -d "${SANDBOX_BASE}/.mole-update-case.XXXXXX")"
 	export HOME TEST_ROOT
 }
 
 teardown() {
 	case "${HOME:-}" in
-		"${BATS_TEST_DIRNAME}/tmp-update-home."*) rm -rf "$HOME" ;;
+		"${SANDBOX_BASE}/.mole-update-home."*) rm -rf "$HOME" ;;
 	esac
 	case "${TEST_ROOT:-}" in
-		"${BATS_TEST_DIRNAME}/tmp-update-case."*) rm -rf "$TEST_ROOT" ;;
+		"${SANDBOX_BASE}/.mole-update-case."*) rm -rf "$TEST_ROOT" ;;
 	esac
 }
 
@@ -208,7 +217,7 @@ INSTALLER
 	exit 0
 fi
 
-if [[ "\$url" == *"api.github.com/repos/tw93/mole/commits/main"* ]]; then
+if [[ "\$url" == *"api.github.com/repos/zigai/Mole/commits/main"* ]]; then
 	printf '{"sha":"%s"}\n' "$latest_commit"
 	exit 0
 fi
@@ -485,8 +494,8 @@ SCRIPT
 	grep -q -- "--prefix" "$installer_args_log"
 	grep -q -- "$manual_bin" "$installer_args_log"
 	[ "$(cat "$installer_version_log")" = "V$current_version" ]
-	grep -q "raw.githubusercontent.com/tw93/mole/V${current_version#V}/install.sh" "$curl_url_log"
-	if grep -q "raw.githubusercontent.com/tw93/mole/main/install.sh" "$curl_url_log"; then
+	grep -q "raw.githubusercontent.com/zigai/Mole/V${current_version#V}/install.sh" "$curl_url_log"
+	if grep -q "raw.githubusercontent.com/zigai/Mole/main/install.sh" "$curl_url_log"; then
 		return 1
 	fi
 	if grep -q '^upgrade mole$' "$brew_log"; then
@@ -520,8 +529,8 @@ SCRIPT
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Already on latest nightly, e31d46f"* ]] || return 1
 	[ ! -e "$installer_args_log" ]
-	grep -q "api.github.com/repos/tw93/mole/commits/main" "$curl_url_log"
-	if grep -q "raw.githubusercontent.com/tw93/mole/main/install.sh" "$curl_url_log"; then
+	grep -q "api.github.com/repos/zigai/Mole/commits/main" "$curl_url_log"
+	if grep -q "raw.githubusercontent.com/zigai/Mole/main/install.sh" "$curl_url_log"; then
 		return 1
 	fi
 }
@@ -560,11 +569,11 @@ SCRIPT
 	[[ "$output" == *"Already on latest nightly, e31d46f"* ]] || return 1
 	[ ! -e "$installer_args_log" ] || return 1
 	[ ! -e "$git_poison_log" ] || return 1
-	grep -qF 'ls-remote https://github.com/tw93/mole.git refs/heads/main' "$git_args_log" || return 1
+	grep -qF 'ls-remote https://github.com/zigai/Mole.git refs/heads/main' "$git_args_log" || return 1
 	[ "$(cat "$git_env_log")" = '0|/usr/bin/false|/usr/bin/false|1|/dev/null|0|C' ] || return 1
 	grep -qF -- '-c credential.helper= -c core.askPass=/usr/bin/false' "$git_args_log" || return 1
 	grep -qF -- '-c protocol.allow=never -c protocol.https.allow=always -c http.sslVerify=true -C /' "$git_args_log" || return 1
-	if grep -q 'raw.githubusercontent.com/tw93/mole/main/install.sh' "$curl_url_log"; then
+	if grep -q 'raw.githubusercontent.com/zigai/Mole/main/install.sh' "$curl_url_log"; then
 		return 1
 	fi
 }
@@ -603,7 +612,7 @@ background_commit=$(get_latest_commit_from_github api-only)
 
 explicit_commit=$(get_latest_commit_from_github)
 [[ "$explicit_commit" == "$LATEST_COMMIT" ]] || exit 1
-grep -qF 'ls-remote https://github.com/tw93/mole.git refs/heads/main' "$GIT_ARGS_LOG"
+grep -qF 'ls-remote https://github.com/zigai/Mole.git refs/heads/main' "$GIT_ARGS_LOG"
 
 get_install_channel() {
 	printf 'nightly\n'
@@ -658,8 +667,8 @@ INNER
 	[[ "$output" == *"Unable to resolve latest nightly commit"* ]] || return 1
 	[[ "$output" == *"mo update --nightly --force"* ]] || return 1
 	[ ! -e "$installer_args_log" ] || return 1
-	grep -qF 'ls-remote https://github.com/tw93/mole.git refs/heads/main' "$git_args_log" || return 1
-	if grep -q 'raw.githubusercontent.com/tw93/mole/main/install.sh' "$curl_url_log"; then
+	grep -qF 'ls-remote https://github.com/zigai/Mole.git refs/heads/main' "$git_args_log" || return 1
+	if grep -q 'raw.githubusercontent.com/zigai/Mole/main/install.sh' "$curl_url_log"; then
 		return 1
 	fi
 }
@@ -731,7 +740,7 @@ INNER
 	[ "$status" -eq 0 ] || return 1
 	[ -f "$installer_args_log" ] || return 1
 	[ "$(cat "$installer_commit_log")" = "$latest_commit" ] || return 1
-	grep -q 'raw.githubusercontent.com/tw93/mole/main/install.sh' "$curl_url_log" || return 1
+	grep -q 'raw.githubusercontent.com/zigai/Mole/main/install.sh' "$curl_url_log" || return 1
 }
 
 @test "mo update --nightly --force reinstalls even when the installed commit is current" {
@@ -764,7 +773,7 @@ INNER
 	grep -q -- "--prefix" "$installer_args_log"
 	[ "$(cat "$installer_version_log")" = "main" ]
 	[ "$(cat "$installer_commit_log")" = "$latest_commit" ] || return 1
-	grep -q "raw.githubusercontent.com/tw93/mole/main/install.sh" "$curl_url_log"
+	grep -q "raw.githubusercontent.com/zigai/Mole/main/install.sh" "$curl_url_log"
 }
 
 @test "mo update tells installer to reuse sudo after parent authentication" {
@@ -810,7 +819,7 @@ SCRIPT
 	[ -f "$installer_sudo_auth_log" ]
 	[ "$(cat "$installer_sudo_auth_log")" = "1" ]
 	grep -q -- "-n true" "$sudo_log"
-	grep -q "raw.githubusercontent.com/tw93/mole/V${current_version#V}/install.sh" "$curl_url_log"
+	grep -q "raw.githubusercontent.com/zigai/Mole/V${current_version#V}/install.sh" "$curl_url_log"
 }
 
 @test "mo update aborts when the sudo session cannot reach the installer child" {
@@ -907,6 +916,9 @@ EOF
 }
 
 @test "mo update keeps Homebrew installs on the Homebrew update path" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	local fake_brew_bin="$TEST_ROOT/homebrew/bin"
 	local fake_brew_mole="$TEST_ROOT/homebrew/Cellar/mole/9.9.9/bin/mole"
 	local brew_log="$TEST_ROOT/brew.log"
@@ -926,6 +938,9 @@ EOF
 }
 
 @test "Homebrew update bounds fallback installed-binary version probes" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	run env HOME="$HOME/bounded-homebrew-version" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 mkdir -p "$HOME"
@@ -960,6 +975,9 @@ EOF
 }
 
 @test "mo update preserves actionable Homebrew diagnostics on failure (#1247)" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	local fake_brew_bin="$TEST_ROOT/homebrew/bin"
 	local fake_brew_mole="$TEST_ROOT/homebrew/Cellar/mole/9.9.9/bin/mole"
 	local brew_log="$TEST_ROOT/brew.log"
@@ -984,6 +1002,9 @@ EOF
 }
 
 @test "mo update trusts a nonzero Homebrew exit without Error text (#1247)" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	local fake_brew_bin="$TEST_ROOT/homebrew/bin"
 	local fake_brew_mole="$TEST_ROOT/homebrew/Cellar/mole/9.9.9/bin/mole"
 	local brew_log="$TEST_ROOT/brew.log"
@@ -1006,6 +1027,9 @@ EOF
 }
 
 @test "mo update never treats mixed failure output as already installed" {
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "macOS-only flow"
+	fi
 	local fake_brew_bin="$TEST_ROOT/homebrew/bin"
 	local fake_brew_mole="$TEST_ROOT/homebrew/Cellar/mole/9.9.9/bin/mole"
 	local brew_log="$TEST_ROOT/brew.log"
@@ -1133,7 +1157,7 @@ INSTALLER
 	exit 0
 fi
 
-if [[ "$url" == *"api.github.com/repos/tw93/mole/commits/main"* ]]; then
+if [[ "$url" == *"api.github.com/repos/zigai/Mole/commits/main"* ]]; then
 	printf '{"sha":"%s"}\n' "$FALSE_SUCCESS_COMMIT"
 	exit 0
 fi
@@ -1290,7 +1314,7 @@ INSTALLER
 	exit 0
 fi
 
-if [[ "\$url" == *"api.github.com/repos/tw93/mole/commits/main"* ]]; then
+if [[ "\$url" == *"api.github.com/repos/zigai/Mole/commits/main"* ]]; then
 	printf '{"sha":"%s"}\n' "$latest_commit"
 	exit 0
 fi
@@ -1359,6 +1383,11 @@ SCRIPT
 }
 
 @test "update lock rejects a live holder and reacquires after release" {
+	# ACL enumeration (`chmod +a`, `chmod -N`, `ls -lde`) and the /usr/bin/lockf
+	# holder below are darwin-only. The linux mkdir-mutex twin follows.
+	if [[ "$(uname -s)" != "Darwin" ]]; then
+		skip "darwin ACL/lockf flow"
+	fi
 	run env HOME="$HOME/update-lock" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
 mkdir -p "$HOME"
@@ -1504,6 +1533,95 @@ INNER
 	[[ "$output" != *"UNEXPECTED_PRIVILEGED_GROUP_WRITABLE_UPDATE_PREFIX_ACCEPTED"* ]] || return 1
 }
 
+@test "update lock rejects a live holder and reacquires after release (linux mkdir mutex)" {
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		skip "linux mkdir-mutex flow"
+	fi
+	run env HOME="$HOME/update-lock" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
+set -euo pipefail
+mkdir -p "$HOME"
+source "$PROJECT_ROOT/lib/core/common.sh"
+VERSION="0.0.1"
+SCRIPT_DIR="$HOME/config"
+source "$PROJECT_ROOT/lib/manage/update.sh"
+
+mkdir -p "$HOME/install/bin"
+/bin/chmod 0775 "$HOME/install/bin"
+[[ "$(/usr/bin/stat "${_MOLE_STAT_MODE_FLAG}" "$HOME/install/bin")" == "775" ]] || exit 1
+# A writable user-owned install needs no sudo, and with the darwin-only ACL
+# enumeration out of the picture the ancestor walk must agree.
+[[ "$(_update_lock_mode_for_install_dir "$HOME/install/bin")" == "false" ]] || exit 1
+
+lock_path=$(_update_lock_path "$HOME/install/bin")
+_update_acquire_lock "$lock_path"
+if _update_acquire_lock "$lock_path"; then
+	echo "UNEXPECTED_CONCURRENT_LOCK"
+	exit 1
+fi
+_update_release_lock "$lock_path" false "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
+[[ -f "$lock_path" ]] || exit 1
+
+# Linux has no /usr/bin/lockf: the mutex is the atomic holder mkdir plus a
+# token naming a live, start-matched owner. Occupy both to emulate an
+# external holder the way the darwin lockf probe does.
+external_start=$(LC_ALL=C /bin/ps -p "$$" -o lstart= 2> /dev/null |
+	/usr/bin/sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | /usr/bin/head -1)
+[[ -n "$external_start" ]] || exit 1
+printf '%s|%s|external\n' "$$" "$external_start" > "$lock_path"
+/bin/mkdir "$(dirname "$lock_path")/holder"
+if _update_acquire_lock "$lock_path"; then
+	echo "UNEXPECTED_EXTERNAL_LOCK_BYPASS"
+	exit 1
+fi
+/bin/rm -f "$lock_path"
+/bin/rmdir "$(dirname "$lock_path")/holder"
+
+_update_acquire_lock "$lock_path"
+_update_release_lock "$lock_path" false "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
+[[ -f "$lock_path" ]] || exit 1
+
+victim="$HOME/update-lock-victim"
+printf 'DO-NOT-TOUCH\n' > "$victim"
+/bin/rm -f "$lock_path"
+ln -s "$victim" "$lock_path"
+if _update_acquire_lock "$lock_path"; then
+	echo "UNEXPECTED_UPDATE_LOCK_SYMLINK_FOLLOW"
+	exit 1
+fi
+[[ "$(cat "$victim")" == "DO-NOT-TOUCH" ]] || exit 1
+unlink "$lock_path"
+
+(
+	actual_pid=""
+	_update_lock_current_shell_pid actual_pid
+	[[ "$actual_pid" =~ ^[0-9]+$ && "$actual_pid" != "$$" ]] || exit 1
+	_update_acquire_lock "$lock_path"
+	case "$(cat "$lock_path")" in
+		"$actual_pid|"*) ;;
+		*) exit 1 ;;
+	esac
+	_update_release_lock "$lock_path" false "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
+)
+
+! compgen -G "$HOME/install/bin/.mole-update.lock/control.*" > /dev/null
+
+if _update_lock_remove_control "/tmp/not-a-mole-control" false "$lock_path"; then
+	echo "UNEXPECTED_AMBIENT_CONTROL_REMOVAL"
+	exit 1
+fi
+declare -f _update_verify_installed_generation | grep -q '_update_acquire_lock'
+INNER
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"UNEXPECTED_CONCURRENT_LOCK"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_EXTERNAL_LOCK_BYPASS"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_UPDATE_LOCK_SYMLINK_FOLLOW"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_AMBIENT_CONTROL_REMOVAL"* ]] || return 1
+}
+
 @test "nightly commit lookup and self-heal fall back to wget" {
 	run env HOME="$HOME/wget-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
@@ -1526,7 +1644,7 @@ command() {
 	builtin command "$@"
 }
 wget() {
-	if [[ "$*" == *"api.github.com/repos/tw93/mole/commits/main"* ]]; then
+	if [[ "$*" == *"api.github.com/repos/zigai/Mole/commits/main"* ]]; then
 		printf '{"sha":"%s"}\n' "$expected_commit"
 		return 0
 	fi

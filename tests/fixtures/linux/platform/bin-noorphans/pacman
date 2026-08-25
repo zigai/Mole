@@ -1,0 +1,3 @@
+#!/bin/bash
+# Stub pacman reporting zero orphans for platform tests.
+exit 0

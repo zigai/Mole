@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Fake pacman for Mole Linux uninstall tests.
+# Driven by MOLE_FAKE_PACMAN_DB (a fixture directory):
+#
+#   packages.tsv : name<TAB>explicit(0|1)<TAB>installed-size-human
+#   owned.txt    : absolute paths owned by some package, one per line
+#
+# Supported queries: -Qetq, -Qet, -Qq [pkg], -Q [pkg], -Qi, -Qoq <path>.
+
+set -euo pipefail
+
+DB="${MOLE_FAKE_PACMAN_DB:-}"
+if [[ -z "$DB" || ! -d "$DB" ]]; then
+    echo "fake pacman: MOLE_FAKE_PACMAN_DB not set" >&2
+    exit 1
+fi
+
+emit_info_block() {
+    local name="$1" size="$2"
+    cat <<EOF
+Repository      : fake
+Name            : ${name}
+Version         : 1.0-1
+Description     : Fake package ${name}
+Installed Size  : ${size}
+EOF
+}
+
+case "${1:-}" in
+    -Q)
+        # -Q [pkg]: list names (+version), or verify one installed
+        if [[ $# -ge 2 ]]; then
+            while IFS=$'\t' read -r name _explicit _size; do
+                [[ "$name" == "$2" ]] && { echo "${name} 1.0-1"; exit 0; }
+            done < "$DB/packages.tsv"
+            exit 1
+        fi
+        cut -f1 "$DB/packages.tsv"
+        ;;
+    -Qq | -Qetq | -Qet)
+        long_output=0
+        [[ "${1:-}" == "-Qet" ]] && long_output=1
+        # Optional trailing [--] <pkg>: verify that single package.
+        want=""
+        if [[ $# -ge 2 ]]; then
+            want="${@: -1}"
+        fi
+        found=0
+        while IFS=$'\t' read -r name explicit _size; do
+            if [[ -n "$want" ]]; then
+                if [[ "$name" == "$want" ]]; then
+                    found=1
+                    break
+                fi
+                continue
+            fi
+            [[ "$explicit" == "1" ]] || continue
+            if [[ $long_output -eq 1 ]]; then
+                echo "${name} 1.0-1"
+            else
+                echo "$name"
+            fi
+        done < "$DB/packages.tsv"
+        if [[ -n "$want" ]]; then
+            if [[ $found -eq 1 ]]; then
+                exit 0
+            fi
+            echo "error: package '$want' was not found" >&2
+            exit 1
+        fi
+        exit 0
+        ;;
+    -Qi)
+        if [[ $# -ge 2 ]]; then
+            while IFS=$'\t' read -r name _explicit size; do
+                if [[ "$name" == "$2" ]]; then
+                    emit_info_block "$name" "$size"
+                    exit 0
+                fi
+            done < "$DB/packages.tsv"
+            exit 1
+        fi
+        while IFS=$'\t' read -r name _explicit size; do
+            emit_info_block "$name" "$size"
+        done < "$DB/packages.tsv"
+        ;;
+    -Qoq)
+        [[ $# -ge 2 ]] || exit 1
+        query="${!#}"
+        while IFS= read -r owned; do
+            if [[ "$owned" == "$query" ]]; then
+                echo "fake-owner-pkg"
+                exit 0
+            fi
+        done < "$DB/owned.txt"
+        echo "error: No package owns $query" >&2
+        exit 1
+        ;;
+    *)
+        echo "fake pacman: unsupported invocation: $*" >&2
+        exit 1
+        ;;
+esac

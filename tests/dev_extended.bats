@@ -1750,6 +1750,10 @@ EOF
 }
 
 @test "clean_developer_tools includes JetBrains logs but not JetBrains cache sweep" {
+    # The Homebrew downloads sweep in this flow is gated to darwin in lib.
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        skip "macOS-only flow"
+    fi
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
