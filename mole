@@ -55,9 +55,14 @@ trap cleanup_temp_files EXIT INT TERM
 
 # Version and update helpers
 VERSION="1.52.0"
-MOLE_TAGLINE="Deep clean and optimize your Mac."
+if [[ "${MOLE_PLATFORM:-}" == "linux" ]]; then
+    MOLE_TAGLINE="Deep clean and optimize your Linux."
+else
+    MOLE_TAGLINE="Deep clean and optimize your Mac."
+fi
 
 is_touchid_configured() {
+    [[ "${MOLE_PLATFORM:-}" == "darwin" ]] || return 1
     grep -q "pam_tid.so" /etc/pam.d/sudo /etc/pam.d/sudo_local 2> /dev/null
 }
 
@@ -69,12 +74,11 @@ source "$SCRIPT_DIR/lib/manage/remove.sh"
 
 # Build the main-menu controls hint line. Pure so the show/hide logic can be
 # tested without a tty (the caller only renders it inside `[[ -t 0 ]]`).
-# Args: $1 touchid_configured (true/false), $2 show_update (true/false).
 _main_menu_controls_line() {
     local touchid_configured="$1"
     local show_update="$2"
     local controls="${GRAY}↑↓  |  Enter  |  M More  |  V Version"
-    if [[ "$touchid_configured" != "true" ]]; then
+    if [[ "$touchid_configured" != "true" && "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
         controls="${controls}  |  T TouchID"
     elif [[ "$show_update" == "true" ]]; then
         controls="${controls}  |  U Update"
@@ -210,6 +214,7 @@ interactive_main_menu() {
                 exit 0
                 ;;
             "TOUCHID")
+                [[ "${MOLE_PLATFORM:-}" == "darwin" ]] || continue
                 show_cursor
                 exec "$SCRIPT_DIR/bin/touchid.sh"
                 ;;

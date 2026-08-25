@@ -17,13 +17,22 @@ if [[ -z "${MOLE_BASE_LOADED:-}" ]]; then
     source "$_MOLE_CORE_DIR/base.sh"
 fi
 
+# Log roots resolve through the platform layer: ~/Library/Logs/mole on
+# darwin, ${XDG_STATE_HOME:-~/.local/state}/mole on linux. log.sh may be
+# sourced directly (bin scripts, tests), so load the platform module when
+# common.sh has not already provided it.
+if [[ -z "${MOLE_PLATFORM_LOADED:-}" ]]; then
+    # shellcheck source=../platform/platform.sh
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../platform" && pwd)/platform.sh"
+fi
+
 # ============================================================================
 # Logging Configuration
 # ============================================================================
 
-readonly LOG_FILE="${HOME}/Library/Logs/mole/mole.log"
-readonly DEBUG_LOG_FILE="${HOME}/Library/Logs/mole/mole_debug_session.log"
-readonly OPERATIONS_LOG_FILE="${HOME}/Library/Logs/mole/operations.log"
+readonly LOG_FILE="$(mole_state_dir)/mole.log"
+readonly DEBUG_LOG_FILE="$(mole_state_dir)/mole_debug_session.log"
+readonly OPERATIONS_LOG_FILE="$(mole_state_dir)/operations.log"
 readonly LOG_MAX_SIZE_DEFAULT=1048576   # 1MB
 readonly OPLOG_MAX_SIZE_DEFAULT=5242880 # 5MB
 

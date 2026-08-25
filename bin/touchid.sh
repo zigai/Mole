@@ -13,6 +13,13 @@ LIB_DIR="$(cd "$SCRIPT_DIR/../lib" && pwd)"
 # shellcheck source=../lib/core/common.sh
 source "$LIB_DIR/core/common.sh"
 
+# Touch ID depends on the macOS PAM stack (pam_tid); refuse cleanly and
+# before touching any PAM configuration anywhere else.
+if [[ "${MOLE_PLATFORM:-}" != "darwin" ]]; then
+    echo "mole: 'touchid' is only supported on macOS." >&2
+    exit 1
+fi
+
 # Set up global cleanup trap
 trap cleanup_temp_files EXIT INT TERM
 

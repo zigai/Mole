@@ -15,6 +15,7 @@ _MOLE_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Load core modules
 source "$_MOLE_CORE_DIR/base.sh"
 prepare_mole_tmpdir > /dev/null
+source "$_MOLE_CORE_DIR/../platform/platform.sh"
 source "$_MOLE_CORE_DIR/log.sh"
 
 source "$_MOLE_CORE_DIR/timeout.sh"
@@ -48,7 +49,11 @@ mole_path_identity() {
     if [[ -e "$normalized" || -L "$normalized" ]]; then
         if command -v stat > /dev/null 2>&1; then
             local fs_id=""
-            fs_id=$(stat -L -f '%d:%i' "$normalized" 2> /dev/null || stat -f '%d:%i' "$normalized" 2> /dev/null || true)
+            if [[ "${MOLE_PLATFORM:-linux}" == "darwin" ]]; then
+                fs_id=$(stat -L -f '%d:%i' "$normalized" 2> /dev/null || stat -f '%d:%i' "$normalized" 2> /dev/null || true)
+            else
+                fs_id=$(stat -L -c '%d:%i' "$normalized" 2> /dev/null || true)
+            fi
             if [[ "$fs_id" =~ ^[0-9]+:[0-9]+$ ]]; then
                 printf 'inode:%s\n' "$fs_id"
                 return 0

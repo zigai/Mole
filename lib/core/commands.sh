@@ -10,7 +10,14 @@ MOLE_COMMANDS=(
     "history:Review cleanup activity"
     "purge:Remove old project artifacts"
     "installer:Find and remove installer files"
-    "touchid:Configure Touch ID for sudo"
+)
+
+# Touch ID is a macOS PAM feature; keep it out of the linux help surface.
+if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
+    MOLE_COMMANDS+=("touchid:Configure Touch ID for sudo")
+fi
+
+MOLE_COMMANDS+=(
     "completion:Setup shell tab completion"
     "update:Update to latest version"
     "remove:Remove Mole from system"
