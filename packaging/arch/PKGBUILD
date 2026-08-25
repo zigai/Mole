@@ -1,0 +1,78 @@
+# Maintainer: zigai <zigai@users.noreply.github.com>
+# shellcheck shell=bash disable=SC2154 # srcdir/pkgdir are provided by makepkg
+# Contributor: Tw93 (upstream Mole)
+#
+# Mole - Deep clean and optimize your Linux.
+# Linux-focused fork of the upstream Mole project.
+#
+# Layout notes (mirrors what install.sh produces):
+#   /usr/lib/mole/mole        entrypoint, SCRIPT_DIR rewritten to /usr/lib/mole
+#   /usr/lib/mole/bin/*.sh    subcommand scripts (analyze-go/status-go beside them)
+#   /usr/lib/mole/lib/**      shell modules, layout preserved exactly
+#   /usr/bin/mo               wrapper exec'ing /usr/lib/mole/mole
+#   /usr/bin/mole             symlink to mo (both names ship upstream)
+
+pkgname=mole-git
+pkgver=1.52.0
+pkgrel=1
+pkgdesc="Deep clean and optimize your Linux - cleanup, uninstall, disk analysis and maintenance CLI"
+arch=(x86_64 aarch64)
+url="https://github.com/zigai/Mole"
+license=('GPL-3.0-only')
+depends=(bash coreutils util-linux)
+makedepends=(git go)
+checkdepends=(bash)
+optdepends=('gio: trash support so deletions stay recoverable'
+            'flatpak: flatpak app uninstall and unused-runtime cleanup')
+provides=(mole)
+conflicts=(mole)
+source=("${pkgname}::git+https://github.com/zigai/Mole.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "${srcdir}/${pkgname}" || exit 1
+    git describe --tags --long | sed 's/^V//; s/\([^-]*-g\)/r\1/; s/-/./g'
+}
+
+build() {
+    cd "${srcdir}/${pkgname}" || exit 1
+    # Pure-Go builds, same flags as upstream's Makefile release targets.
+    export CGO_ENABLED=0
+    export GOPATH="${srcdir}/gopath"
+    export GOCACHE="${srcdir}/gocache"
+    go build -mod=mod -ldflags "-s -w" -o bin/analyze-go ./cmd/analyze
+    go build -mod=mod -ldflags "-s -w" -o bin/status-go ./cmd/status
+}
+
+check() {
+    cd "${srcdir}/${pkgname}" || exit 1
+    local f
+    while IFS= read -r f; do
+        bash -n "$f"
+    done < <(find bin lib -type f -name '*.sh')
+    bash -n mole mo
+}
+
+package() {
+    cd "${srcdir}/${pkgname}" || exit 1
+    local _libdir="${pkgdir}/usr/lib/mole"
+
+    install -d -m755 "${_libdir}/bin" "${_libdir}/lib"
+    cp -r lib/. "${_libdir}/lib/"
+    install -m755 bin/*.sh "${_libdir}/bin/"
+    install -m755 bin/analyze-go bin/status-go "${_libdir}/bin/"
+
+    # The entrypoint resolves modules relative to its own directory, so it
+    # ships inside /usr/lib/mole with SCRIPT_DIR rewritten the same way the
+    # official install.sh rewrites it for $HOME/.config/mole layouts.
+    sed 's|^SCRIPT_DIR=.*|SCRIPT_DIR="/usr/lib/mole"|' mole > "${_libdir}/mole"
+    chmod 755 "${_libdir}/mole"
+
+    # `mo` is the upstream alias script; point its exec at the packaged tree.
+    install -d -m755 "${pkgdir}/usr/bin"
+    sed 's|^SCRIPT_DIR=.*|SCRIPT_DIR="/usr/lib/mole"|' mo > "${pkgdir}/usr/bin/mo"
+    chmod 755 "${pkgdir}/usr/bin/mo"
+
+    # Upstream installs both entry names; `mole` is the compatibility name.
+    ln -s mo "${pkgdir}/usr/bin/mole"
+}

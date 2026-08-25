@@ -1,7 +1,8 @@
 #!/bin/bash
-# Mole - Installer for manual installs.
-# Fetches source/binaries and installs to prefix.
-# Supports update and edge installs.
+# Mole (zigai/Mole Linux fork) - Installer for manual installs.
+# Fetches source/binaries and installs to prefix. Linux is the primary
+# target; macOS keeps the upstream-compatible path. Supports update and
+# edge installs.
 
 set -euo pipefail
 
@@ -19,6 +20,22 @@ else
     RED='\033[0;31m'
     NC='\033[0m'
 fi
+
+# Platform gate. This fork targets Linux first; macOS keeps working through
+# the same installer flow (upstream-compatible layout), everything else is
+# refused. All later platform switches route through $MOLE_PLATFORM.
+case "$(uname -s)" in
+    Linux)
+        MOLE_PLATFORM="linux"
+        ;;
+    Darwin)
+        MOLE_PLATFORM="darwin"
+        ;;
+    *)
+        printf 'mole: unsupported platform: %s\n' "$(uname -s)" >&2
+        exit 1
+        ;;
+esac
 
 _SPINNER_PID=""
 start_line_spinner() {
@@ -284,8 +301,13 @@ install_lock_has_unsafe_ancestor() {
         INSTALL_LOCK_UNSAFE_ANCESTOR="$probe"
         INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="symlink"
         [[ ! -L "$probe" ]] || return 0
-        owner_uid=$(/usr/bin/stat -f%u "$probe" 2> /dev/null || true)
-        mode=$(/usr/bin/stat -f%Lp "$probe" 2> /dev/null || true)
+        if [[ "$MOLE_PLATFORM" == "darwin" ]]; then
+            owner_uid=$(/usr/bin/stat -f%u "$probe" 2> /dev/null || true)
+            mode=$(/usr/bin/stat -f%Lp "$probe" 2> /dev/null || true)
+        else
+            owner_uid=$(stat -c%u "$probe" 2> /dev/null || true)
+            mode=$(stat -c%a "$probe" 2> /dev/null || true)
+        fi
         INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="unreadable"
         [[ "$owner_uid" =~ ^[0-9]+$ && "$mode" =~ ^[0-7]+$ ]] || return 0
         if [[ "$use_sudo" == "true" || ${EUID:-0} -eq 0 ]]; then
@@ -303,11 +325,22 @@ install_lock_has_unsafe_ancestor() {
             (((8#$mode & 0002) == 0)) || return 0
         fi
         INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="unreadable"
-        acl_listing=$(/bin/ls -lde "$probe" 2> /dev/null) || return 0
-        INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="acl"
-        if printf '%s\n' "$acl_listing" |
-            /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:.*[[:space:]]allow[[:space:]]'; then
-            return 0
+        if [[ "$MOLE_PLATFORM" == "darwin" ]]; then
+            acl_listing=$(/bin/ls -lde "$probe" 2> /dev/null) || return 0
+            INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="acl"
+            if printf '%s\n' "$acl_listing" |
+                /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:.*[[:space:]]allow[[:space:]]'; then
+                return 0
+            fi
+        elif command -v getfacl > /dev/null 2>&1; then
+            acl_listing=$(getfacl -p --absolute-names "$probe" 2> /dev/null) || return 0
+            INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="acl"
+            # Named users/groups, a mask, or default entries all grant access
+            # beyond what the mode bits show, same as an allow ACL on macOS.
+            if printf '%s\n' "$acl_listing" |
+                grep -Eq '^(mask:|user:[^:]|group:[^:]|default:)'; then
+                return 0
+            fi
         fi
         [[ "$probe" == "/" ]] && break
         local parent_probe="${probe%/*}"
@@ -384,13 +417,27 @@ install_lock_prepare_dir() {
     # macOS applies inherited ACLs even when mkdir requests mode 0700. Remove
     # them before touching the lock file, then verify that no ACL entry remains.
     # Once this succeeds, only the expected owner can mutate directory entries.
-    install_lock_command "$use_sudo" /bin/chmod -N "$lock_dir" 2> /dev/null || return 1
-    acl_listing=$(install_lock_command "$use_sudo" /bin/ls -lde "$lock_dir" 2> /dev/null) || return 1
-    if printf '%s\n' "$acl_listing" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'; then
-        return 1
+    # Linux does not inherit ACLs on mkdir; when getfacl is present, still
+    # refuse named entries for the same guarantee.
+    if [[ "$MOLE_PLATFORM" == "darwin" ]]; then
+        install_lock_command "$use_sudo" /bin/chmod -N "$lock_dir" 2> /dev/null || return 1
+        acl_listing=$(install_lock_command "$use_sudo" /bin/ls -lde "$lock_dir" 2> /dev/null) || return 1
+        if printf '%s\n' "$acl_listing" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'; then
+            return 1
+        fi
+    elif command -v getfacl > /dev/null 2>&1; then
+        acl_listing=$(getfacl -p --absolute-names "$lock_dir" 2> /dev/null) || return 1
+        if printf '%s\n' "$acl_listing" | grep -Eq '^(mask:|user:[^:]|group:[^:]|default:)'; then
+            return 1
+        fi
     fi
-    owner_uid=$(install_lock_command "$use_sudo" /usr/bin/stat -f%u "$lock_dir" 2> /dev/null || true)
-    mode=$(install_lock_command "$use_sudo" /usr/bin/stat -f%Lp "$lock_dir" 2> /dev/null || true)
+    if [[ "$MOLE_PLATFORM" == "darwin" ]]; then
+        owner_uid=$(install_lock_command "$use_sudo" /usr/bin/stat -f%u "$lock_dir" 2> /dev/null || true)
+        mode=$(install_lock_command "$use_sudo" /usr/bin/stat -f%Lp "$lock_dir" 2> /dev/null || true)
+    else
+        owner_uid=$(install_lock_command "$use_sudo" stat -c%u "$lock_dir" 2> /dev/null || true)
+        mode=$(install_lock_command "$use_sudo" stat -c%a "$lock_dir" 2> /dev/null || true)
+    fi
     if [[ "$use_sudo" == "true" ]]; then
         expected_uid=0
     fi
@@ -650,7 +697,7 @@ get_remote_main_commit_hash() {
     local response=""
     local commit_hash=""
     response=$(curl -fsSL --connect-timeout 3 --max-time 5 \
-        "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null || true)
+        "https://api.github.com/repos/zigai/Mole/commits/main" 2> /dev/null || true)
     commit_hash=$(printf '%s\n' "$response" |
         sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([a-f0-9]\{40\}\)".*/\1/p' | head -1)
     [[ "$commit_hash" =~ ^[0-9a-f]{40}$ ]] || return 1
@@ -662,11 +709,11 @@ source_archive_url() {
     local source_commit="${2:-}"
 
     if [[ "$branch" == "main" && "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
-        printf 'https://github.com/tw93/mole/archive/%s.tar.gz\n' "$source_commit"
+        printf 'https://github.com/zigai/Mole/archive/%s.tar.gz\n' "$source_commit"
     elif [[ "$branch" == "main" || "$branch" == "dev" ]]; then
-        printf 'https://github.com/tw93/mole/archive/refs/heads/%s.tar.gz\n' "$branch"
+        printf 'https://github.com/zigai/Mole/archive/refs/heads/%s.tar.gz\n' "$branch"
     else
-        printf 'https://github.com/tw93/mole/archive/refs/tags/%s.tar.gz\n' "$branch"
+        printf 'https://github.com/zigai/Mole/archive/refs/tags/%s.tar.gz\n' "$branch"
     fi
 }
 
@@ -762,7 +809,7 @@ resolve_source_dir() {
         local clone_succeeded=false
         if [[ -n "$source_commit" ]]; then
             if git init -q "$tmp/mole" > /dev/null 2>&1 &&
-                git -C "$tmp/mole" remote add origin https://github.com/tw93/mole.git > /dev/null 2>&1 &&
+                git -C "$tmp/mole" remote add origin https://github.com/zigai/Mole.git > /dev/null 2>&1 &&
                 git -C "$tmp/mole" fetch -q --depth=1 origin "$source_commit" > /dev/null 2>&1 &&
                 git -C "$tmp/mole" checkout -q --detach FETCH_HEAD > /dev/null 2>&1; then
                 clone_succeeded=true
@@ -772,7 +819,7 @@ resolve_source_dir() {
             if [[ "$branch" != "main" ]]; then
                 git_args+=("--branch" "$branch")
             fi
-            if git clone "${git_args[@]}" https://github.com/tw93/mole.git "$tmp/mole" > /dev/null 2>&1; then
+            if git clone "${git_args[@]}" https://github.com/zigai/Mole.git "$tmp/mole" > /dev/null 2>&1; then
                 clone_succeeded=true
             fi
         fi
@@ -816,7 +863,7 @@ get_latest_release_tag() {
         return 1
     fi
     tag=$(curl -fsSL --connect-timeout 2 --max-time 3 \
-        "https://api.github.com/repos/tw93/mole/releases/latest" 2> /dev/null |
+        "https://api.github.com/repos/zigai/Mole/releases/latest" 2> /dev/null |
         sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
     if [[ -z "$tag" ]]; then
         return 1
@@ -828,7 +875,7 @@ get_latest_release_tag_from_git() {
     if ! command -v git > /dev/null 2>&1; then
         return 1
     fi
-    git ls-remote --tags --refs https://github.com/tw93/mole.git 2> /dev/null |
+    git ls-remote --tags --refs https://github.com/zigai/Mole.git 2> /dev/null |
         awk -F/ '{print $NF}' |
         grep -E '^V[0-9]' |
         sort -V |
@@ -848,7 +895,7 @@ normalize_release_tag() {
 
 release_checksums_url() {
     local tag="$1"
-    printf 'https://github.com/tw93/mole/releases/download/%s/SHA256SUMS\n' "$tag"
+    printf 'https://github.com/zigai/Mole/releases/download/%s/SHA256SUMS\n' "$tag"
 }
 
 download_release_checksums() {
@@ -885,7 +932,7 @@ verify_release_attestation() {
     # produced by self-hosted runners, which a repo compromise could otherwise
     # introduce as a sidechannel.
     if gh attestation verify "$file" \
-        --owner tw93 \
+        --owner zigai \
         --deny-self-hosted-runners \
         > /dev/null 2>&1; then
         return 0
@@ -1145,12 +1192,18 @@ normalize_install_dir() {
 
 # Environment checks and directory setup
 check_requirements() {
-    if [[ "$OSTYPE" != "darwin"* ]]; then
-        log_error "This tool is designed for macOS only"
-        exit 1
-    fi
+    case "$MOLE_PLATFORM" in
+        linux) ;;
+        darwin)
+            log_warning "This fork targets Linux; running the upstream-compatible macOS install path"
+            ;;
+        *)
+            log_error "Unsupported platform: $MOLE_PLATFORM (Linux is the primary target)"
+            exit 1
+            ;;
+    esac
 
-    if homebrew_owns_mole; then
+    if [[ "$MOLE_PLATFORM" == "darwin" ]] && homebrew_owns_mole; then
         local mole_path
         mole_path=$(command -v mole 2> /dev/null || true)
         local is_homebrew_binary=false
@@ -1242,7 +1295,9 @@ install_staged_binary() {
     local target_path="$2"
 
     chmod +x "$staged_path" || return 1
-    xattr -c "$staged_path" 2> /dev/null || true
+    if [[ "$MOLE_PLATFORM" == "darwin" ]]; then
+        xattr -c "$staged_path" 2> /dev/null || true
+    fi
     mv -f "$staged_path" "$target_path"
 }
 
@@ -1254,8 +1309,13 @@ download_binary() {
     local arch
     arch=$(uname -m)
     local arch_suffix="amd64"
-    if [[ "$arch" == "arm64" ]]; then
-        arch_suffix="arm64"
+    case "$arch" in
+        arm64 | aarch64) arch_suffix="arm64" ;;
+        *) arch_suffix="amd64" ;;
+    esac
+    local platform_token="linux"
+    if [[ "$MOLE_PLATFORM" == "darwin" ]]; then
+        platform_token="darwin"
     fi
 
     if [[ -f "$SOURCE_DIR/bin/${binary_name}-go" ]]; then
@@ -1266,8 +1326,8 @@ download_binary() {
         fi
         log_success "Installed local ${binary_name} binary"
         return 0
-    elif [[ -f "$SOURCE_DIR/bin/${binary_name}-darwin-${arch_suffix}" ]]; then
-        if ! cp "$SOURCE_DIR/bin/${binary_name}-darwin-${arch_suffix}" "$staged_path" ||
+    elif [[ -f "$SOURCE_DIR/bin/${binary_name}-${platform_token}-${arch_suffix}" ]]; then
+        if ! cp "$SOURCE_DIR/bin/${binary_name}-${platform_token}-${arch_suffix}" "$staged_path" ||
             ! install_staged_binary "$staged_path" "$target_path"; then
             rm -f "$staged_path"
             return 1
@@ -1297,8 +1357,8 @@ download_binary() {
     fi
     local release_tag
     release_tag="$(normalize_release_tag "$version")"
-    local asset_name="${binary_name}-darwin-${arch_suffix}"
-    local url="https://github.com/tw93/mole/releases/download/${release_tag}/${asset_name}"
+    local asset_name="${binary_name}-${platform_token}-${arch_suffix}"
+    local url="https://github.com/zigai/Mole/releases/download/${release_tag}/${asset_name}"
 
     # Skip preflight network checks to avoid false negatives.
 
@@ -1332,7 +1392,7 @@ download_binary() {
     local fallback_tag
     fallback_tag=$(get_latest_release_tag 2> /dev/null || true)
     if [[ -n "$fallback_tag" && "$fallback_tag" != "$release_tag" ]]; then
-        local fallback_url="https://github.com/tw93/mole/releases/download/${fallback_tag}/${asset_name}"
+        local fallback_url="https://github.com/zigai/Mole/releases/download/${fallback_tag}/${asset_name}"
         start_line_spinner "Retrying ${binary_name} from ${fallback_tag}..."
         if curl_download_with_retry "$fallback_url" "$staged_path" 2> /dev/null; then
             if [[ -t 1 ]]; then stop_line_spinner; fi
@@ -1460,9 +1520,16 @@ install_files() {
     fi
 
     if [[ "$source_dir_abs" != "$install_dir_abs" ]]; then
-        # Use absolute /usr/bin/sed (always BSD on macOS) so PATH-shadowed
-        # GNU sed from Homebrew gnu-sed does not break the -i '' syntax.
-        if ! maybe_sudo /usr/bin/sed -i '' "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$CONFIG_DIR\"|" "$INSTALL_DIR/mole"; then
+        # BSD sed needs an explicit empty backup suffix; GNU sed (Linux)
+        # forbids one. Keep each platform on its native syntax.
+        local -a sed_args=()
+        if [[ "$MOLE_PLATFORM" == "darwin" ]]; then
+            sed_args=(-i '')
+        else
+            sed_args=(-i)
+        fi
+        if ! maybe_sudo sed "${sed_args[@]}" \
+            "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$CONFIG_DIR\"|" "$INSTALL_DIR/mole"; then
             log_error "Failed to point $INSTALL_DIR/mole at $CONFIG_DIR"
             return 1
         fi
@@ -1567,7 +1634,9 @@ print_usage_summary() {
         echo "  mo optimize                  # Check and maintain system"
         echo "  mo analyze                   # Explore disk usage"
         echo "  mo status                    # Monitor system health"
-        echo "  mo touchid                   # Configure Touch ID for sudo"
+        [[ "$MOLE_PLATFORM" == "darwin" ]] &&
+            echo "  mo touchid                   # Configure Touch ID for sudo"
+        echo "  mo completion                # Set up shell tab completion"
         echo "  mo update                    # Update to latest version"
         echo "  mo --help                    # Show all commands"
     else
@@ -1577,7 +1646,9 @@ print_usage_summary() {
         echo "  $INSTALL_DIR/mo optimize                  # Check and maintain system"
         echo "  $INSTALL_DIR/mo analyze                   # Explore disk usage"
         echo "  $INSTALL_DIR/mo status                    # Monitor system health"
-        echo "  $INSTALL_DIR/mo touchid                   # Configure Touch ID for sudo"
+        [[ "$MOLE_PLATFORM" == "darwin" ]] &&
+            echo "  $INSTALL_DIR/mo touchid                   # Configure Touch ID for sudo"
+        echo "  $INSTALL_DIR/mo completion                # Set up shell tab completion"
         echo "  $INSTALL_DIR/mo update                    # Update to latest version"
         echo "  $INSTALL_DIR/mo --help                    # Show all commands"
     fi
@@ -1654,7 +1725,7 @@ perform_install() {
 perform_update() {
     check_requirements
 
-    if homebrew_owns_mole; then
+    if [[ "$MOLE_PLATFORM" == "darwin" ]] && homebrew_owns_mole; then
         resolve_source_dir 2> /dev/null || true
         local current_version
         current_version=$(get_installed_version || echo "unknown")

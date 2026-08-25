@@ -60,7 +60,8 @@ jobs:
       - name: Check Go formatting (goimports -l)
         run: |
           export PATH=$(go env GOPATH)/bin:$PATH
-          UNFORMATTED=$(goimports -l -local github.com/tw93/mole ./cmd ./internal)
+          LOCAL_MODULE="$(go list -m)"
+          UNFORMATTED=$(goimports -l -local "$LOCAL_MODULE" ./cmd ./internal)
           if [[ -n "$UNFORMATTED" ]]; then
             echo "::error::Go files are not formatted:"
             echo "$UNFORMATTED"
