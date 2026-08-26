@@ -1,11 +1,13 @@
 #!/bin/bash
 # Mole - Linux uninstall enumeration: backend merge, dedupe, and index build.
 #
-# Merges the pacman / flatpak / desktop backends (row format documented in
-# lib/uninstall/backends/pacman.sh) into the selector's app index. Dedupe
-# priority when two backends surface the same identity:
+# Merges the active native backend (pacman on Arch, deb on Debian-family,
+# rpm on Fedora/RHEL-family), flatpak, and desktop backends (row format
+# documented in lib/uninstall/backends/pacman.sh) into the selector's app
+# index. Exactly ONE native backend is enabled per run. Dedupe priority when
+# two backends surface the same identity:
 #
-#   1. pacman row (package owns the payload)
+#   1. native row (the package manager owns the payload)
 #   2. flatpak row
 #   3. desktop-entry row
 #
@@ -18,7 +20,8 @@
 #     <last-used-epoch>|<target-path>|<display-name>|<kind:id>|<size>|<last-used>|<size-kb>
 #
 # kind:id encodes the removal channel for lib/uninstall/linux_batch.sh:
-# "pacman:<pkg>", "flatpak:<app-id>", or "desktop:<binary-path>".
+# "pacman:<pkg>", "deb:<pkg>", "rpm:<pkg>", "flatpak:<app-id>", or
+# "desktop:<binary-path>".
 #
 # Inventory fingerprint (metadata-cache key): checksum of the package list
 # plus the flatpak app list.
@@ -33,6 +36,14 @@ if [[ -z "${MOLE_UNINSTALL_BACKEND_PACMAN_LOADED:-}" ]]; then
     # shellcheck source=lib/uninstall/backends/pacman.sh
     source "$_MOLE_ENUMERATE_DIR/backends/pacman.sh"
 fi
+if [[ -z "${MOLE_UNINSTALL_BACKEND_DEB_LOADED:-}" ]]; then
+    # shellcheck source=lib/uninstall/backends/deb.sh
+    source "$_MOLE_ENUMERATE_DIR/backends/deb.sh"
+fi
+if [[ -z "${MOLE_UNINSTALL_BACKEND_RPM_LOADED:-}" ]]; then
+    # shellcheck source=lib/uninstall/backends/rpm.sh
+    source "$_MOLE_ENUMERATE_DIR/backends/rpm.sh"
+fi
 if [[ -z "${MOLE_UNINSTALL_BACKEND_FLATPAK_LOADED:-}" ]]; then
     # shellcheck source=lib/uninstall/backends/flatpak.sh
     source "$_MOLE_ENUMERATE_DIR/backends/flatpak.sh"
@@ -42,13 +53,69 @@ if [[ -z "${MOLE_UNINSTALL_BACKEND_DESKTOP_LOADED:-}" ]]; then
     source "$_MOLE_ENUMERATE_DIR/backends/desktop.sh"
 fi
 
-# Echo the enabled backend names, one per line.
-enumerate_linux_backends() {
-    if declare -f mole_detect_distro > /dev/null 2>&1 && [[ -z "${MOLE_DISTRO_ID:-}" ]]; then
+# Resolve the ONE active native package backend: "pacman", "deb", or "rpm".
+# Distro affinity wins when MOLE_DISTRO_ID is known (arch family -> pacman,
+# debian family -> deb, fedora/rhel family -> rpm); unknown distros fall back
+# to capability probes so generic systems still get whatever native tooling
+# exists. Echoes nothing when no native backend is usable.
+_enumerate_linux_native_backend() {
+    local id="${MOLE_DISTRO_ID:-}"
+    if [[ -z "$id" ]] && declare -f mole_detect_distro > /dev/null 2>&1; then
         mole_detect_distro > /dev/null 2>&1 || true
+        id="${MOLE_DISTRO_ID:-}"
     fi
+    case "$id" in
+        arch | archlinux | manjaro | endeavouros | garuda | artix | cachyos)
+            if pacman_backend_available; then
+                echo "pacman"
+                return 0
+            fi
+            ;;
+        debian | ubuntu | mint | pop | elementary | kali | zorin | devuan | neon)
+            if deb_backend_available; then
+                echo "deb"
+                return 0
+            fi
+            ;;
+        fedora | rhel | centos | rocky | almalinux | alma | ol)
+            if rpm_backend_available; then
+                echo "rpm"
+                return 0
+            fi
+            ;;
+    esac
+    # Unknown distro (or the affinity backend is missing): capability probes,
+    # first match wins so only one native backend is ever enabled.
     if pacman_backend_available; then
         echo "pacman"
+    elif deb_backend_available; then
+        echo "deb"
+    elif rpm_backend_available; then
+        echo "rpm"
+    fi
+}
+
+# Ask whichever native package backend is active whether it owns an absolute
+# path. Shared by the desktop-entry backend and the batch executor so
+# ownership checks are never hardcoded to pacman.
+native_backend_owns_path() {
+    local path="$1"
+    [[ -n "$path" ]] || return 1
+    case "$(_enumerate_linux_native_backend)" in
+        pacman) pacman_backend_owns_path "$path" ;;
+        deb) deb_backend_owns_path "$path" ;;
+        rpm) rpm_backend_owns_path "$path" ;;
+        *) return 1 ;;
+    esac
+}
+
+# Echo the enabled backend names, one per line: exactly one native backend
+# (when any is usable) plus flatpak and desktop.
+enumerate_linux_backends() {
+    local native=""
+    native=$(_enumerate_linux_native_backend)
+    if [[ -n "$native" ]]; then
+        echo "$native"
     fi
     if flatpak_backend_available; then
         echo "flatpak"
@@ -56,12 +123,18 @@ enumerate_linux_backends() {
     echo "desktop"
 }
 
-# Checksum of the package + flatpak lists; empty inputs hash to a stable
-# sentinel so an empty system is still cacheable.
+# Checksum of the active native package list plus the flatpak list; empty
+# inputs hash to a stable sentinel so an empty system is still cacheable.
 enumerate_linux_fingerprint() {
+    local native=""
+    native=$(_enumerate_linux_native_backend)
     local combined=""
     combined=$( {
-        pacman_backend_explicit_packages
+        case "$native" in
+            pacman) pacman_backend_explicit_packages ;;
+            deb) deb_backend_explicit_packages ;;
+            rpm) rpm_backend_explicit_packages ;;
+        esac
         echo "---"
         flatpak_backend_app_ids
     } 2> /dev/null | LC_ALL=C cksum) || combined=""
@@ -69,7 +142,7 @@ enumerate_linux_fingerprint() {
     printf '%s' "${combined:-none}"
 }
 
-# True when a pacman row id is denied for uninstallation.
+# True when a native (pacman/deb/rpm) row id is denied for uninstallation.
 _enumerate_linux_package_protected() {
     local pkg="$1"
     if declare -f is_protected_linux_package > /dev/null 2>&1; then
@@ -79,13 +152,19 @@ _enumerate_linux_package_protected() {
 }
 
 # Merge raw backend rows: dedupe by id and target path, drop protected
-# packages, and emit rows in backend priority order (pacman, flatpak,
+# packages, and emit rows in backend priority order (native, flatpak,
 # desktop).
 enumerate_linux_rows() {
     local merged_file=""
     merged_file=$(mktemp "${TMPDIR:-/tmp}/mole.enumerate.XXXXXX") || return 1
 
-    pacman_backend_rows >> "$merged_file" 2> /dev/null || true
+    local native=""
+    native=$(_enumerate_linux_native_backend)
+    case "$native" in
+        pacman) pacman_backend_rows >> "$merged_file" 2> /dev/null || true ;;
+        deb) deb_backend_rows >> "$merged_file" 2> /dev/null || true ;;
+        rpm) rpm_backend_rows >> "$merged_file" 2> /dev/null || true ;;
+    esac
     flatpak_backend_rows >> "$merged_file" 2> /dev/null || true
     desktop_backend_rows >> "$merged_file" 2> /dev/null || true
 
@@ -108,7 +187,7 @@ enumerate_linux_rows() {
         local kind="${row%%|*}"
         local id
         id=$(printf '%s' "$row" | cut -d'|' -f2)
-        if [[ "$kind" == "pacman" ]] && _enumerate_linux_package_protected "$id"; then
+        if [[ "$kind" == "$native" ]] && _enumerate_linux_package_protected "$id"; then
             continue
         fi
         printf '%s\n' "$row"
@@ -138,9 +217,10 @@ enumerate_linux_index() {
             return sprintf("%dB", bytes)
         }
         function target_for(kind, id, path) {
-            if (kind == "pacman") return "pacman:" id
             if (kind == "flatpak") return "flatpak:" id
-            return "desktop:" path
+            if (kind == "desktop") return "desktop:" path
+            # Native package rows (pacman/deb/rpm) all carry the package id.
+            return kind ":" id
         }
         {
             kind = $1; id = $2; name = $3; kb = $4; path = $5

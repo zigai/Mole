@@ -411,16 +411,26 @@ is_linux_critical_system_path() {
     return 1
 }
 
-# Pacman-ownership guard hook (Linux): a path owned by an installed package
-# must never be deleted manually; removal goes through pacman itself. Active
-# during uninstall flows where the candidate set is small; sweeps on clean
-# paths do not pay a per-path subprocess cost.
+# Native-package-ownership guard hook (Linux): a path owned by an installed
+# package must never be deleted manually; removal goes through the distro
+# package manager itself. Probes pacman, then rpm, then dpkg by availability
+# — identical external behavior on Arch. Active during uninstall flows where
+# the candidate set is small; sweeps on clean paths do not pay a per-path
+# subprocess cost.
 mole_pacman_owns_path() {
     local path="$1"
     [[ -n "$path" ]] || return 1
     [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]] || return 1
-    command -v pacman > /dev/null 2>&1 || return 1
-    LC_ALL=C pacman -Qoq -- "$path" > /dev/null 2>&1
+    if command -v pacman > /dev/null 2>&1; then
+        LC_ALL=C pacman -Qoq -- "$path" > /dev/null 2>&1
+    elif command -v rpm > /dev/null 2>&1; then
+        LC_ALL=C rpm -qf --queryformat '%{NAME}\n' -- "$path" > /dev/null 2>&1
+    elif command -v dpkg-query > /dev/null 2>&1; then
+        # Same database as `dpkg -S`, without taking the dpkg lock.
+        LC_ALL=C dpkg-query -S -- "$path" > /dev/null 2>&1
+    else
+        return 1
+    fi
 }
 
 # Centralized logic to protect system settings, control center, and critical apps

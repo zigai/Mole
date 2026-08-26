@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Fake dpkg-query for Mole Linux uninstall tests.
+# Driven by env fixtures:
+#
+#   MOLE_FAKE_DPKG_QUERY : TSV, one row per installed package:
+#                          name<TAB>installed-size-kib<TAB>manual(0|1)
+#   MOLE_FAKE_DPKG_OWNED : text file of absolute paths owned by some package
+#
+# Supported queries:
+#   -W [-f FMT] [--] [pkg]  -> "name|kib" rows, or one package's status
+#   -S [--] <path>          -> "<owner>: <path>" line
+
+set -euo pipefail
+
+DB="${MOLE_FAKE_DPKG_QUERY:-}"
+if [[ -z "$DB" || ! -r "$DB" ]]; then
+    echo "fake dpkg-query: MOLE_FAKE_DPKG_QUERY not set" >&2
+    exit 1
+fi
+
+case "${1:-}" in
+    -W)
+        # -W [-f FMT] [--] [pkg]: dump pairs, or report one package's status.
+        want=""
+        if [[ $# -ge 3 && "${3:-}" != "--" ]]; then
+            want="$3"
+        elif [[ $# -ge 4 && "${3:-}" == "--" ]]; then
+            want="$4"
+        fi
+        if [[ -n "$want" ]]; then
+            while IFS=$'\t' read -r name _size _manual; do
+                [[ "$name" == "$want" ]] && {
+                    printf 'install ok installed\n'
+                    exit 0
+                }
+            done < "$DB"
+            printf 'dpkg-query: no packages found matching %s\n' "$want" >&2
+            exit 1
+        fi
+        while IFS=$'\t' read -r name size _manual; do
+            printf '%s|%s\n' "$name" "$size"
+        done < "$DB"
+        ;;
+    -S)
+        # -S [--] path: report owning packages like dpkg does ("pkg: path").
+        want="${!#}"
+        [[ "$want" == "--" ]] && { echo "fake dpkg-query: missing path" >&2; exit 1; }
+        while IFS= read -r owned; do
+            [[ "$owned" == "$want" ]] && {
+                printf 'fake-owner-pkg: %s\n' "$owned"
+                exit 0
+            }
+        done < "${MOLE_FAKE_DPKG_OWNED:-/dev/null}"
+        printf 'dpkg-query: no path found matching %s\n' "$want" >&2
+        exit 1
+        ;;
+    *)
+        echo "fake dpkg-query: unsupported invocation: $*" >&2
+        exit 1
+        ;;
+esac

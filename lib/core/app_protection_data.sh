@@ -658,6 +658,19 @@ if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
         "networkmanager"
         "dbus"
         "udev"
+
+        # Cross-distro criticals (Debian / Fedora families), additive to the
+        # Arch entries above: kernel and bootloader-adjacent, libc, init,
+        # sudo, coreutils, and the package managers themselves.
+        "kernel"
+        "linux-image-amd64"
+        "linux-generic"
+        "systemd-sysv"
+        "libc6"
+        "dnf"
+        "apt"
+        "dpkg"
+        "rpm"
     )
 
     # Ids whose leftovers always go through the review-only tier even when

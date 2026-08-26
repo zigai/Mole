@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Fake rpm for Mole Linux uninstall tests.
+# Driven by env fixtures:
+#
+#   MOLE_FAKE_RPM_DB    : TSV, one row per installed package:
+#                         name<TAB>size-bytes<TAB>userinstalled(0|1)
+#   MOLE_FAKE_RPM_OWNED : text file of absolute paths owned by some package
+#
+# Supported queries:
+#   -qa --qf '%{NAME}|%{SIZE}\n'          -> "name|bytes" rows
+#   -q [--] <pkg>                         -> rc 0 when installed
+#   -qf --queryformat '%{NAME}\n' <path>  -> owner name when owned
+
+set -euo pipefail
+
+DB="${MOLE_FAKE_RPM_DB:-}"
+if [[ -z "$DB" || ! -r "$DB" ]]; then
+    echo "fake rpm: MOLE_FAKE_RPM_DB not set" >&2
+    exit 1
+fi
+
+case "${1:-}" in
+    -qa)
+        while IFS=$'\t' read -r name size _user; do
+            printf '%s|%s\n' "$name" "$size"
+        done < "$DB"
+        ;;
+    -q)
+        want="${!#}"
+        [[ "$want" == "--" ]] && { echo "fake rpm: missing package" >&2; exit 1; }
+        while IFS=$'\t' read -r name _size _user; do
+            [[ "$name" == "$want" ]] && { printf '%s-1.0-1.fc41\n' "$name"; exit 0; }
+        done < "$DB"
+        printf 'package %s is not installed\n' "$want" >&2
+        exit 1
+        ;;
+    -qf)
+        want="${!#}"
+        while IFS= read -r owned; do
+            [[ "$owned" == "$want" ]] && {
+                printf 'fake-owner-pkg\n'
+                exit 0
+            }
+        done < "${MOLE_FAKE_RPM_OWNED:-/dev/null}"
+        printf 'file %s is not owned by any package\n' "$want" >&2
+        exit 1
+        ;;
+    *)
+        echo "fake rpm: unsupported invocation: $*" >&2
+        exit 1
+        ;;
+esac

@@ -1,0 +1,6 @@
+#!/bin/bash
+# Fake apt-get for Mole Linux uninstall tests.
+# Removal is only ever planned, never executed through this stub, so every
+# invocation stays silent and succeeds.
+
+exit 0

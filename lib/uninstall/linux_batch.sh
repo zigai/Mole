@@ -7,10 +7,12 @@
 # the platform channels:
 #
 #   pacman:<pkg>       -> `sudo pacman -Rns --noconfirm <pkg>` (never manual rm)
+#   deb:<pkg>          -> `sudo apt-get -y remove <pkg>`
+#   rpm:<pkg>          -> `sudo dnf -y remove <pkg>`
 #   flatpak:<app-id>   -> `flatpak uninstall --noninteractive <app-id>`;
-#                         ~/.var/app/<app-id> is previewed explicitly first and
-#                         trashed after a successful uninstall (--delete-data is
-#                         never trusted blind, contract §5)
+#                        ~/.var/app/<app-id> is previewed explicitly first and
+#                        trashed after a successful uninstall (--delete-data is
+#                        never trusted blind, contract §5)
 #   desktop:<binary>   -> binary plus its unowned .desktop entries, trashed
 #
 # Safety rules preserved on Linux:
@@ -19,9 +21,10 @@
 #     effect of each row.
 #   - No launchd/login-items/brew branches exist here: that teardown is macOS
 #     only and stays in the macOS path.
-#   - Sudo is escalated once, only when a pacman row needs it or a leftover
-#     outside $HOME would have to be removed; non-package-owned system paths
-#     are never deleted manually, so in practice sudo covers pacman only.
+#   - Sudo is escalated once, only when a native package row (pacman/deb/rpm)
+#     needs it or a leftover outside $HOME would have to be removed;
+#     non-package-owned system paths are never deleted manually, so in
+#     practice sudo covers package removal only.
 #   - Review-tier leftovers are never deleted automatically.
 
 if [[ -n "${MOLE_LINUX_BATCH_LOADED:-}" ]]; then
@@ -33,6 +36,10 @@ _MOLE_LINUX_BATCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -z "${MOLE_UNINSTALL_LEFTOVERS_LOADED:-}" ]]; then
     # shellcheck source=lib/uninstall/leftovers.sh
     source "$_MOLE_LINUX_BATCH_DIR/leftovers.sh"
+fi
+if [[ -z "${MOLE_UNINSTALL_ENUMERATE_LOADED:-}" ]]; then
+    # shellcheck source=lib/uninstall/enumerate.sh
+    source "$_MOLE_LINUX_BATCH_DIR/enumerate.sh"
 fi
 
 _linux_batch_is_dry_run() {
@@ -54,6 +61,12 @@ _linux_batch_identity_still_valid() {
         pacman)
             pacman_backend_package_installed "$_LINUX_ROW_ID"
             ;;
+        deb)
+            deb_backend_package_installed "$_LINUX_ROW_ID"
+            ;;
+        rpm)
+            rpm_backend_package_installed "$_LINUX_ROW_ID"
+            ;;
         flatpak)
             flatpak_backend_app_installed "$_LINUX_ROW_ID"
             ;;
@@ -67,7 +80,7 @@ _linux_batch_identity_still_valid() {
 }
 
 # Collect the .desktop launcher files whose Exec/TryExec resolves to the
-# given binary and which pacman does not own.
+# given binary and which the active native package backend does not own.
 _linux_batch_desktop_entries_for_binary() {
     local binary="$1"
     local root desktop_file exec_value try_exec token resolved dir_name
@@ -90,7 +103,7 @@ _linux_batch_desktop_entries_for_binary() {
                 fi
             fi
             [[ "${resolved:-}" == "$binary" ]] || continue
-            pacman_backend_owns_path "$desktop_file" && continue
+            native_backend_owns_path "$desktop_file" && continue
             printf '%s\n' "$desktop_file"
         done < <(command find "$root" -maxdepth 1 -name '*.desktop' -print0 2> /dev/null)
     done < <(desktop_backend_roots)
@@ -111,6 +124,12 @@ _linux_batch_preview_row() {
     case "$_LINUX_ROW_KIND" in
         pacman)
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${GRAY}Plan:${NC} $(pacman_backend_remove_plan "$_LINUX_ROW_ID")"
+            ;;
+        deb)
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${GRAY}Plan:${NC} $(deb_backend_remove_plan "$_LINUX_ROW_ID")"
+            ;;
+        rpm)
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${GRAY}Plan:${NC} $(rpm_backend_remove_plan "$_LINUX_ROW_ID")"
             ;;
         flatpak)
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${GRAY}Plan:${NC} $(flatpak_backend_uninstall_plan "$_LINUX_ROW_ID")"
@@ -230,6 +249,12 @@ _linux_batch_execute_row() {
             pacman)
                 log_info "[DRY RUN] Would run: $(pacman_backend_remove_plan "$_LINUX_ROW_ID")" >&2
                 ;;
+            deb)
+                log_info "[DRY RUN] Would run: $(deb_backend_remove_plan "$_LINUX_ROW_ID")" >&2
+                ;;
+            rpm)
+                log_info "[DRY RUN] Would run: $(rpm_backend_remove_plan "$_LINUX_ROW_ID")" >&2
+                ;;
             flatpak)
                 log_info "[DRY RUN] Would run: $(flatpak_backend_uninstall_plan "$_LINUX_ROW_ID")" >&2
                 ;;
@@ -250,6 +275,12 @@ _linux_batch_execute_row() {
     case "$_LINUX_ROW_KIND" in
         pacman)
             sudo pacman -Rns --noconfirm -- "$_LINUX_ROW_ID" > /dev/null 2>&1 || failed=1
+            ;;
+        deb)
+            sudo apt-get -y remove -- "$_LINUX_ROW_ID" > /dev/null 2>&1 || failed=1
+            ;;
+        rpm)
+            sudo dnf -y remove -- "$_LINUX_ROW_ID" > /dev/null 2>&1 || failed=1
             ;;
         flatpak)
             flatpak uninstall --noninteractive -- "$_LINUX_ROW_ID" > /dev/null 2>&1 || failed=1
@@ -320,9 +351,9 @@ batch_uninstall_applications_linux() {
         return 1
     fi
 
-    # Sudo escalation: required only for pacman removals. Non-package-owned
-    # system paths are never deleted manually, so no other source of root is
-    # reachable from this flow.
+    # Sudo escalation: required only for native package removals
+    # (pacman/deb/rpm). Non-package-owned system paths are never deleted
+    # manually, so no other source of root is reachable from this flow.
     if ! _linux_batch_is_dry_run; then
         local row kind id
         local needs_sudo=0
@@ -330,14 +361,16 @@ batch_uninstall_applications_linux() {
             IFS='|' read -r _ _ _ bundle_field _ <<< "$row"
             kind="${bundle_field%%:*}"
             id="${bundle_field#*:}"
-            if [[ "$kind" == "pacman" ]]; then
-                needs_sudo=1
-                break
-            fi
+            case "$kind" in
+                pacman | deb | rpm)
+                    needs_sudo=1
+                    break
+                    ;;
+            esac
         done
         if [[ $needs_sudo -eq 1 ]]; then
             if declare -f ensure_sudo_session > /dev/null 2>&1; then
-                if ! ensure_sudo_session "Admin access is required to remove packages with pacman"; then
+                if ! ensure_sudo_session "Admin access is required to remove packages"; then
                     log_error "Admin access denied"
                     unset MOLE_UNINSTALL_MODE
                     return 1

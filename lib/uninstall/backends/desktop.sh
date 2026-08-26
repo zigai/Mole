@@ -11,10 +11,9 @@
 # when any of the following holds:
 #
 #   - Type != Application, NoDisplay=true, or Hidden=true
-#   - X-Flatpak=true (owned by the flatpak backend)
-#   - the .desktop file itself is owned by an enumerated pacman package
-#     (LC_ALL=C `pacman -Qoq` check)
-#   - the resolved binary is owned by a pacman package
+#   - the .desktop file itself is owned by an enumerated native package
+#     (pacman/deb/rpm ownership check)
+#   - the resolved binary is owned by a native package
 #   - the resolved binary lives under ~/.var/app (flatpak territory)
 #
 # The target-path of a row is the resolved binary; removal trashes that
@@ -26,9 +25,11 @@ fi
 readonly MOLE_UNINSTALL_BACKEND_DESKTOP_LOADED=1
 
 _MOLE_DESKTOP_BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -z "${MOLE_UNINSTALL_BACKEND_PACMAN_LOADED:-}" ]]; then
-    # shellcheck source=lib/uninstall/backends/pacman.sh
-    source "$_MOLE_DESKTOP_BACKEND_DIR/pacman.sh"
+if [[ -z "${MOLE_UNINSTALL_ENUMERATE_LOADED:-}" ]]; then
+    # Pulls in every backend plus the native_backend_owns_path dispatcher;
+    # guard vars make this cycle-safe when enumerate.sh loads us first.
+    # shellcheck source=lib/uninstall/enumerate.sh
+    source "$_MOLE_DESKTOP_BACKEND_DIR/../enumerate.sh"
 fi
 
 desktop_backend_available() {
@@ -139,7 +140,7 @@ desktop_backend_rows() {
             case "$is_flatpak" in true | True | TRUE | 1) continue ;; esac
 
             # Package-owned launchers belong to their package's uninstall row.
-            if pacman_backend_owns_path "$desktop_file"; then
+            if native_backend_owns_path "$desktop_file"; then
                 continue
             fi
 
@@ -151,7 +152,7 @@ desktop_backend_rows() {
             case "$binary" in
                 "$HOME"/.var/app/*) continue ;;
             esac
-            if pacman_backend_owns_path "$binary"; then
+            if native_backend_owns_path "$binary"; then
                 continue
             fi
 

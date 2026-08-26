@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Fake dnf for Mole Linux uninstall tests.
+# `repoquery --userinstalled` lists every package whose userinstalled flag is
+# 1 in the MOLE_FAKE_RPM_DB TSV (name<TAB>bytes<TAB>userinstalled). Removal is
+# only ever planned, never executed, so every other invocation stays silent
+# and succeeds.
+
+set -euo pipefail
+
+for arg in "$@"; do
+    if [[ "$arg" == "repoquery" ]]; then
+        DB="${MOLE_FAKE_RPM_DB:-}"
+        if [[ -z "$DB" || ! -r "$DB" ]]; then
+            echo "fake dnf: MOLE_FAKE_RPM_DB not set" >&2
+            exit 1
+        fi
+        while IFS=$'\t' read -r name _size user; do
+            [[ "$user" == "1" ]] && printf '%s\n' "$name"
+        done < "$DB"
+        exit 0
+    fi
+done
+
+exit 0

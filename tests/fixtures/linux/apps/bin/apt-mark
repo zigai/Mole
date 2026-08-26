@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Fake apt-mark for Mole Linux uninstall tests.
+# `showmanual` lists every package whose manual flag is 1 in the
+# MOLE_FAKE_DPKG_QUERY TSV (name<TAB>kib<TAB>manual); other subcommands are
+# silent successes.
+
+set -euo pipefail
+
+case "${1:-}" in
+    showmanual)
+        DB="${MOLE_FAKE_DPKG_QUERY:-}"
+        if [[ -z "$DB" || ! -r "$DB" ]]; then
+            echo "fake apt-mark: MOLE_FAKE_DPKG_QUERY not set" >&2
+            exit 1
+        fi
+        while IFS=$'\t' read -r name _size manual; do
+            [[ "$manual" == "1" ]] && printf '%s\n' "$name"
+        done < "$DB"
+        ;;
+    *)
+        echo "fake apt-mark: unsupported invocation: $*" >&2
+        exit 1
+        ;;
+esac

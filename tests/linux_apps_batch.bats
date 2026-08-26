@@ -183,3 +183,81 @@ EOF
     [[ "$output" == *"Cancelled."* ]]
     [[ "$output" == *"rc=0"* ]]
 }
+
+@test "dry-run plans deb and rpm rows through the same executor" {
+    cat > "$FAKE_DB/payload.sh" <<'PAYLOAD'
+set -uo pipefail
+export PATH="$FIXTURE_BIN:$PATH"
+export MOLE_FAKE_PACMAN_DB="$MOLE_FAKE_PACMAN_DB"
+export MOLE_TIMEOUT_QUICK_DETECT_SEC=60
+export MOLE_TIMEOUT_SHORT_QUERY_SEC=60
+export MOLE_UNINSTALL_LINUX_BIN_DIR="$MOLE_UNINSTALL_LINUX_BIN_DIR"
+export MOLE_PLATFORM=linux
+export TERM=dumb
+export MOLE_DRY_RUN=1
+cd "$PROJECT_ROOT"
+source lib/core/common.sh
+source lib/uninstall/backends/deb.sh
+source lib/uninstall/backends/rpm.sh
+ensure_sudo_session() { return 0; }
+source lib/uninstall/batch.sh
+
+selected_apps=(
+    "0|$MOLE_UNINSTALL_LINUX_BIN_DIR/deb-app|Deb App|deb:deb-app|100KB|Unknown|100"
+    "0|$MOLE_UNINSTALL_LINUX_BIN_DIR/rpm-app|Rpm App|rpm:rpm-app|200KB|Unknown|200"
+)
+
+batch_uninstall_applications_linux < /dev/null
+echo "rc=$?"
+PAYLOAD
+
+    run env \
+        HOME="$HOME" \
+        PROJECT_ROOT="$PROJECT_ROOT" \
+        FIXTURE_BIN="$FIXTURE_BIN" \
+        MOLE_FAKE_PACMAN_DB="$FAKE_DB" \
+        MOLE_UNINSTALL_LINUX_BIN_DIR="$BIN_ROOT" \
+        /bin/bash "$FAKE_DB/payload.sh"
+
+    [ "$status" -eq 0 ]
+    # Assertions run against a color-stripped copy: rendering may or may not
+    # be colorized, but the plan CONTENT is the contract under test.
+    local plain_output
+    plain_output="$(printf '%s' "$output" | sed $'s/\x1b\[[0-9;]*[A-Za-z]//g')"
+    [[ "$plain_output" == *"Plan: sudo apt-get -y remove deb-app"* ]]
+    [[ "$plain_output" == *"Plan: sudo dnf -y remove rpm-app"* ]]
+    [[ "$plain_output" == *"Removed 2 application(s)"* ]]
+    [[ "$plain_output" == *"rc=0"* ]]
+}
+
+@test "TOCTOU: a deb row whose package vanished before execution is skipped" {
+    run /bin/bash <<EOF
+set -uo pipefail
+export HOME="$HOME"
+export PATH="$FIXTURE_BIN:\$PATH"
+export MOLE_FAKE_PACMAN_DB="$FAKE_DB"
+export MOLE_FAKE_DPKG_QUERY="$FAKE_DB/dpkg.tsv"
+: > "$FAKE_DB/dpkg.tsv"
+export MOLE_TIMEOUT_QUICK_DETECT_SEC=60
+export MOLE_TIMEOUT_SHORT_QUERY_SEC=60
+export MOLE_UNINSTALL_LINUX_BIN_DIR="$BIN_ROOT"
+export MOLE_PLATFORM=linux
+export TERM=dumb
+cd "$PROJECT_ROOT"
+source lib/core/common.sh
+ensure_sudo_session() { return 0; }
+source lib/uninstall/batch.sh
+
+# NOTE: deb-vanish is deliberately NOT added to the fake dpkg database.
+selected_apps=("0|$BIN_ROOT/deb-app|Deb App|deb:deb-vanish|100KB|Unknown|100")
+batch_uninstall_applications_linux < /dev/null
+echo "rc=\$?"
+printf 'skipped=%s\n' "\${#LINUX_BATCH_SKIPPED[@]}"
+printf 'success=%s\n' "\${#LINUX_BATCH_SUCCESS[@]}"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"no longer installed in the expected form"* ]]
+    [[ "$output" == *"skipped=1"* ]]
+    [[ "$output" == *"success=0"* ]]
+}
