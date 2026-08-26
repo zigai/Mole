@@ -18,8 +18,10 @@ all reviewable, logged, and dry-run capable.
 
 This fork ports the Mole CLI to **Linux**:
 
-- **Arch Linux first** — pacman cache cleanup, orphan package removal,
-  journald vacuuming, AUR helper cache sweeping.
+- **Arch Linux first**, Debian/Ubuntu and Fedora/RHEL families supported —
+  pacman/dnf/apt cache cleanup, orphaned-package reporting and removal,
+  journald vacuuming, AUR helper cache sweeping. Unknown distros fall back
+  to tool-driven safe defaults (flatpak cleanup still offered).
 - **Extensible distro modules** — each distro implements a small capability
   contract (`distro_id`, `distro_pkg_manager`, plan functions); unknown
   distros fall back to a safe generic module. See
@@ -34,12 +36,15 @@ This fork ports the Mole CLI to **Linux**:
 Mapped to real commands in this fork:
 
 - `mo clean` — reviews known-safe caches, logs, temporary files, developer
-  artifacts, and leftovers from uninstalled software. On Arch: pacman package
-  cache pruning (`paccache`), journal vacuum, AUR helper caches, user
-  `~/.cache/*` sweep with mole's own state excluded.
+  artifacts, and leftovers from uninstalled software. Per distro: pacman
+  package cache pruning (`paccache`) on Arch, `dnf clean packages` on
+  Fedora, `apt-get clean` on Debian/Ubuntu; journald vacuum everywhere
+  systemd lives; AUR helper caches on Arch; user `~/.cache/*` sweep with
+  mole's own state excluded.
 - `mo uninstall` — removes installed packages/apps plus related leftovers,
-  using pacman, flatpak, and desktop-entry backends. Never deletes
-  package-owned files blindly; ownership is queried first.
+  using pacman (Arch), dpkg/apt (Debian), rpm/dnf (Fedora), flatpak, and
+  desktop-entry backends. Never deletes package-owned files blindly;
+  ownership is queried first.
 - `mo optimize` — bounded, previewable maintenance tasks.
 - `mo analyze` — terminal disk explorer (Go TUI): navigate, filter,
   multi-select, confirmed moves to Trash via `gio trash`.
@@ -168,14 +173,13 @@ boundaries.
 Distro support is a single shell module implementing a small capability
 contract — queries echo results, plans echo commands that the caller previews
 and confirms. See [docs/linux-platform.md](docs/linux-platform.md) for the
-full contract, a worked Fedora skeleton, and the testing guide.
+full contract, shipped-module coverage, and the testing guide.
 
 ## Roadmap
 
-- More distro modules beyond Arch (the generic fallback already works
-  everywhere; per-distro polish lands as modules are contributed).
-- Broader uninstall backend coverage (currently pacman, flatpak,
-  desktop entries).
+- Per-distro polish beyond the three shipped families (e.g. zypper/apk
+  modules; the generic fallback already works everywhere).
+- Deeper leftovers knowledge for desktop-entry-only apps.
 - Explicitly out of scope: a **GUI**, and the companion **Mac app**
   (upstream's Mole Mac). This fork is CLI only.
 

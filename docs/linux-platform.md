@@ -21,7 +21,7 @@ mole (entrypoint)
              │       else lib/platform/linux/generic.sh
              │
        bin/clean.sh / lib/clean/**      consume plans via preview+confirm+sudo
-       lib/uninstall/backends/**        pacman / flatpak / desktop-entry backends
+       lib/uninstall/backends/**        pacman / deb / rpm / flatpak / desktop backends
 ```
 
 Layers:
@@ -43,15 +43,19 @@ Layers:
    providers. They NEVER prompt and NEVER execute side effects; they only
    answer queries and echo command plans. The calling code owns previewing,
    confirmation, dry-run, sudo, and execution.
-3. **Backends** (`lib/uninstall/backends/{pacman,flatpak,desktop}.sh`).
+3. **Backends** (`lib/uninstall/backends/{pacman,deb,rpm,flatpak,desktop}.sh`).
    Uninstall enumeration is owned by these backends, not by the distro
-   module. Backend selection: pacman enabled when the `pacman` binary
-   exists (on Arch and Arch-derivatives that is always; selection is a
-   capability probe, so other distros with pacman get correct rows too);
-   flatpak enabled when the binary exists;
-   desktop-entry backend always available for entries not owned by a listed
-   package. Row format is internal to these modules (documented in each
-   module header) and must feed the existing paginated selector UX.
+   module. Exactly ONE native backend is enabled, chosen by distro
+   affinity from `MOLE_DISTRO_ID` (arch*->pacman, debian/ubuntu/mint/pop*->deb,
+   fedora/rhel/centos/rocky/alma*->rpm); when the ID is unknown the
+   selector falls back to capability probes (first of pacman/rpm/deb whose
+   binaries exist). deb rows come from `apt-mark showmanual` sizes via
+   `dpkg-query`; rpm rows from `dnf repoquery --userinstalled` sizes via
+   `rpm -qa`. Both gate rows on a representative binary under /usr/bin.
+   flatpak enabled when the binary exists; desktop-entry backend always
+   available for entries not owned by a listed package. Row format is
+   internal to these modules (documented in each module header) and must
+   feed the existing paginated selector UX.
 
 ## Distro Capability Contract
 
@@ -113,94 +117,78 @@ Dropped on Linux (deleted cleanly on the linux path, kept for darwin behind
 gates): Time Machine, APFS snapshots, iOS firmware/backups, Apple Silicon
 caches, Finder metadata, iCloud/Mail dirs, Xcode/iOS tooling.
 
-## Worked Example: a `fedora.sh` Skeleton
+## Shipped Modules & Adding a New Distro
 
-Create `lib/platform/linux/fedora.sh`. Fedora's `ID_LIKE` is
-`fedora rhel`, so the resolver finds it directly by `ID=fedora`.
+Three capability modules ship in-tree:
+
+| Module | Matches via | Package manager | Uninstall backend |
+|---|---|---|---|
+| `arch.sh` | `ID=arch`, `ID_LIKE` containing `arch` | pacman | pacman |
+| `debian.sh` | `ID=debian`, ubuntu/mint/pop!_os via `ID_LIKE` | apt | deb |
+| `fedora.sh` | `ID=fedora`, rhel/centos/rocky/alma via `ID_LIKE` | dnf | rpm |
+
+Unknown distros load `generic.sh`: flatpak cleanup still works, package
+and journal plans stay inert.
+
+To add another distro, create `lib/platform/linux/<id>.sh` following the
+real modules (read `arch.sh`, `debian.sh`, or `fedora.sh` first - they are
+the contract made concrete). Skeleton shape:
 
 ```bash
 #!/bin/bash
-# Fedora distro module. Implements the distro capability contract.
-# Queries never prompt; plans only echo commands (require-root lines
-# prefixed exactly "sudo "). See docs/linux-platform.md.
+# <Distro> distro module. Queries echo results; plans echo one command per
+# line ("sudo "-prefixed when root is required). Never prompt, never mutate.
 
-# --- distro_init: detect optional tools once into DISTRO_* vars -------------
+distro_id() { printf 'opensuse\n'; }
+distro_pkg_manager() { printf 'zypper\n'; }
 
-DISTRO_DNF=""
-DISTRO_JOURNALCTL=""
-DISTRO_FLATPAK=""
-
-if have_cmd dnf; then
-    DISTRO_DNF="dnf"
-fi
-if have_cmd journalctl; then
-    DISTRO_JOURNALCTL="journalctl"
-fi
-if have_cmd flatpak; then
-    DISTRO_FLATPAK="flatpak"
-fi
-
-distro_id() {
-    echo "fedora"
-}
-
-distro_pkg_manager() {
-    echo "${DISTRO_DNF}"
+distro_init() {
+    # Detect optional tools ONCE into DISTRO_* vars (called by platform.sh).
+    DISTRO_JOURNALCTL=""; DISTRO_SYSTEMCTL=""; DISTRO_FLATPAK=""
+    have_cmd journalctl && DISTRO_JOURNALCTL="journalctl"
+    have_cmd systemctl && DISTRO_SYSTEMCTL="systemctl"
+    have_cmd flatpak    && DISTRO_FLATPAK="flatpak"
 }
 
 distro_pkg_cache_plan() {
-    local keep="${1:-}"
-    [[ -n "$keep" ]] || return 0
-    if [[ -n "$DISTRO_DNF" ]]; then
-        # Metadata + orphaned packages; dnf keeps no per-version pkg cache.
-        echo "sudo dnf clean all"
-        echo "sudo dnf autoremove -y"
-    fi
+    have_cmd zypper || return 0
+    printf 'sudo zypper clean -a\n'
 }
 
 distro_pkg_cache_summary() {
-    local du_bin
-    du_bin="$(command -v du 2> /dev/null || true)"
-    [[ -n "$du_bin" && -d /var/cache/dnf ]] || return 0
-    du -sh /var/cache/dnf 2> /dev/null | awk '{print "dnf cache: " $1}'
-}
-
-distro_orphans_list() {
-    # Leaves nothing behind by default; report only explicit leftovers.
+    local dir="${MOLE_PKG_CACHE_DIR:-/var/cache/zypp/packages}"
+    [[ -d "$dir" ]] || return 0
+    # Every du MUST be bounded (tests audit this).
+    local size
+    size="$(run_with_timeout "${MOLE_TIMEOUT_DISK_VERIFY_SEC:-15}" \
+        du -sh "$dir" 2> /dev/null | cut -f1)" || return 0
+    [[ -n "$size" ]] && printf 'Zypper package cache: %s\n' "$size"
     return 0
 }
 
-distro_orphans_remove_plan() {
-    return 0
-}
-
+distro_orphans_list()          { return 0; }
+distro_orphans_remove_plan()   { return 0; }
 distro_journal_vacuum_plan() {
-    if [[ -n "$DISTRO_JOURNALCTL" ]]; then
-        echo "sudo journalctl --vacuum-size=100M --vacuum-time=2weeks"
-    fi
-}
-
-distro_flatpak_unused_plan() {
-    if [[ -n "$DISTRO_FLATPAK" ]]; then
-        echo "flatpak uninstall --unused --noninteractive"
-    fi
-}
-
-distro_aur_cache_dirs() {
+    [[ -n "$DISTRO_JOURNALCTL" && -n "$DISTRO_SYSTEMCTL" ]] && \
+        printf 'sudo journalctl --vacuum-size=100M --vacuum-time=2weeks\n'
     return 0
 }
+distro_flatpak_unused_plan() {
+    [[ -n "$DISTRO_FLATPAK" ]] && printf 'flatpak uninstall --unused --noninteractive\n'
+    return 0
+}
+distro_aur_cache_dirs() { return 0; }
 ```
 
 Notes:
 
 - `have_cmd()` comes from `lib/platform/linux/common.sh` (sourced before the
-  distro module). Use the XDG root getters there (`linux_cache_home`,
-  `linux_config_home`, `linux_data_home`, `linux_state_home`,
-  `linux_trash_dir`) instead of hardcoding paths.
-- Register the new module by creating `lib/platform/linux/fedora.sh`; the
-  resolver picks it up from `/etc/os-release`. Distros sharing the base
-  resolve through `ID_LIKE` automatically (e.g. `ID=bazzite` with
-  `ID_LIKE="fedora"` reuses this module).
+  distro module). Use the XDG root getters there instead of hardcoding paths.
+- The resolver picks the module up from `/etc/os-release`; derivatives
+  resolve through `ID_LIKE` automatically.
+- If your distro needs native-package uninstall rows, add a backend under
+  `lib/uninstall/backends/` mirroring `deb.sh`/`rpm.sh` and register its
+  affinity in `_enumerate_linux_native_backend` (enumerate.sh).
 
 ## Testing Guide
 
