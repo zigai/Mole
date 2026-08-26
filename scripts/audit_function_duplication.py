@@ -53,6 +53,15 @@ ALLOWED_GROUPS: dict[tuple[str, ...], str] = {
     ("show_history_help", "show_installer_help"): (
         "same help frame, different command text; the frame is the shared part and already is"
     ),
+    ("distro_orphans_remove_plan",): (
+        "distro capability modules implement the same contract step per "
+        "package manager; structural parity across arch/fedora/debian is the "
+        "design, only the package commands differ"
+    ),
+    ("distro_pkg_cache_summary",): (
+        "same bounded-du contract step per distro module; cache roots and "
+        "labels differ, structure is intentionally parallel"
+    ),
 }
 
 FUNC_START = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\)\s*\{\s*$")
@@ -110,7 +119,9 @@ def find_groups() -> list[tuple[tuple[str, ...], list[tuple[str, str]]]]:
     for members in buckets.values():
         if len(members) < 2:
             continue
-        key = tuple(sorted(name for _, name in members))
+        # Same-named functions across files (distro capability modules)
+        # collapse to one name so single-name allowances match.
+        key = tuple(sorted({name for _, name in members}))
         groups.append((key, sorted(members)))
     groups.sort(key=lambda item: (-len(item[1]), item[0]))
     return groups

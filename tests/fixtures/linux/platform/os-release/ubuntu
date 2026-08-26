@@ -1,0 +1,7 @@
+NAME="Ubuntu"
+PRETTY_NAME="Ubuntu 24.04 LTS"
+ID=ubuntu
+ID_LIKE="debian"
+VERSION_ID="24.04"
+VERSION="24.04 LTS (Noble Numbat)"
+HOME_URL="https://www.ubuntu.com/"

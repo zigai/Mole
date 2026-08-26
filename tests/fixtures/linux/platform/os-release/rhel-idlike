@@ -1,0 +1,10 @@
+NAME="CentOS Stream"
+PRETTY_NAME="CentOS Stream 9"
+ID=centos
+ID_LIKE="rhel fedora"
+VERSION_ID="9"
+PLATFORM_ID="platform:el9"
+HOME_URL="https://centos.org/"
+BUG_REPORT_URL="https://bugzilla.redhat.com/"
+REDHAT_SUPPORT_PRODUCT="Red Hat Enterprise Linux 9"
+REDHAT_SUPPORT_PRODUCT_VERSION="CentOS Stream"
