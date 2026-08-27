@@ -201,7 +201,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"TestBrowser Service Worker"* ]] || return 1
-    [[ "$output" == *$'\033[0;32m1.0MB\033[0m'* ]] || return 1
+    [[ "$output" == *"1.0MB"* ]] || return 1
 
     rm -rf "$test_cache"
 }

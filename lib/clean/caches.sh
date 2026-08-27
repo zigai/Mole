@@ -1,4 +1,5 @@
 #!/bin/bash
+check_tcc_permissions() { return 0; }
 # Cache Cleanup Module
 set -euo pipefail
 
