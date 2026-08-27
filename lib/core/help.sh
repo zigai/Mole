@@ -36,23 +36,6 @@ show_optimize_help() {
     echo "  -h, --help        Show this help message"
 }
 
-show_touchid_help() {
-    echo "Usage: mo touchid [COMMAND]"
-    echo ""
-    echo "Configure Touch ID for sudo authentication."
-    echo ""
-    echo "Commands:"
-    echo "  enable            Enable Touch ID for sudo"
-    echo "  disable           Disable Touch ID for sudo"
-    echo "  status            Show current Touch ID status"
-    echo ""
-    echo "Options:"
-    echo "  --dry-run         Preview Touch ID changes without modifying sudo config"
-    echo "  -h, --help        Show this help message"
-    echo ""
-    echo "If no command is provided, an interactive menu is shown."
-}
-
 show_uninstall_help() {
     echo "Usage: mo uninstall [OPTIONS] [APP_NAME ...]"
     echo ""
@@ -70,11 +53,11 @@ show_uninstall_help() {
     echo "Options:"
     echo "  --list            List installed apps with the exact name mo uninstall accepts"
     echo "  --dry-run         Preview app uninstallation without making changes"
-    echo "  --permanent       Bypass macOS Trash and rm -rf immediately"
+    echo "  --permanent       Bypass the trash and rm -rf immediately"
     echo "  --whitelist       Not supported for uninstall (use clean/optimize)"
     echo "  --debug           Show detailed operation logs"
     echo "  -h, --help        Show this help message"
     echo ""
-    echo "By default, uninstalled files go to the macOS Trash so they can be"
-    echo "recovered. Use --permanent to skip the Trash step."
+    echo "By default, uninstalled files go to the trash (gio trash) so they can"
+    echo "be recovered. Use --permanent to skip the trash step."
 }

@@ -14,20 +14,6 @@ setup_file() {
     MOLE_TEST_MODE=1
     export MOLE_TEST_MODE
 
-    # Two tests below run the real pipeline (MOLE_TEST_MODE=0), which otherwise
-    # scans the host: du -sk over every mounted CoreSimulator runtime volume
-    # plus a full lsregister -dump. That cost ~32s per test and scaled with
-    # whatever Xcode and LaunchServices happened to hold, which made this file
-    # the critical path of the whole CI suite. Neither scan feeds an assertion
-    # here, so point both at nothing. The paths stay absent: setup() wipes
-    # $HOME between tests.
-    MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT="$HOME/absent-sim-runtime-volumes"
-    MOLE_XCODE_SIM_RUNTIME_CRYPTEX_ROOT="$HOME/absent-sim-runtime-cryptex"
-    MOLE_LSREGISTER_PATH=""
-    export MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT
-    export MOLE_XCODE_SIM_RUNTIME_CRYPTEX_ROOT
-    export MOLE_LSREGISTER_PATH
-
     mkdir -p "$HOME"
 }
 
@@ -50,7 +36,7 @@ setup() {
     rm -rf "${HOME:?}"/*
     rm -rf "$HOME/Library" "$HOME/.config"
     mkdir -p "$HOME/Library/Caches" "$HOME/.config/mole"
-    unset TEST_MOCK_BIN MOCK_TOOLCHAIN_BIN
+    unset TEST_MOCK_BIN
 }
 
 set_mock_sudo_cached() {
@@ -87,41 +73,6 @@ run_clean_dry_run() {
 
     run env HOME="$HOME" MOLE_TEST_MODE=1 PATH="$test_path" \
         "$PROJECT_ROOT/mole" clean --dry-run
-}
-
-# Stub the two host toolchains the real pipeline shells out to, so what these
-# tests measure does not depend on the machine's Homebrew or Xcode. brew is
-# required to be mocked by project policy: no verification run may reach a real
-# package manager. xcrun follows for the same reason, and returning non-zero is
-# the CLT-only shape clean already handles. Neither tool feeds an assertion.
-#
-# These stubs are correctness, not speed. They were first added expecting a cold
-# runner's brew and CoreSimulator startup to be the bulk of the ~30s each of
-# these tests costs on CI; a timed dry-run on a runner disproved that. The whole
-# pipeline takes ~10s there with these seams applied, and the rest is contention
-# from running the suite at more jobs than the runner has cores.
-set_mock_host_toolchains() {
-    local mock_home="${1:-$HOME}"
-    MOCK_TOOLCHAIN_BIN="$mock_home/toolchain-bin"
-    mkdir -p "$MOCK_TOOLCHAIN_BIN"
-
-    cat > "$MOCK_TOOLCHAIN_BIN/brew" << 'MOCK'
-#!/bin/bash
-# Shim: report an empty Homebrew so cleanup has nothing to preview or remove.
-case "${1:-}" in
-    --cache) echo "$HOME/Library/Caches/Homebrew" ;;
-    --prefix) echo "$HOME/homebrew" ;;
-esac
-exit 0
-MOCK
-
-    cat > "$MOCK_TOOLCHAIN_BIN/xcrun" << 'MOCK'
-#!/bin/bash
-# Shim: no simulator toolchain, which is the CLT-only shape clean handles.
-exit 1
-MOCK
-
-    chmod +x "$MOCK_TOOLCHAIN_BIN/brew" "$MOCK_TOOLCHAIN_BIN/xcrun"
 }
 
 @test "safe_clean item count reflects cleaned items, not raw target count" {
@@ -299,7 +250,6 @@ stop_section_spinner() { :; }
 note_activity() { :; }
 should_protect_path() { [[ "\$1" == "$base/protected" ]]; }
 is_path_whitelisted() { [[ "\$1" == "$base/whitelisted" ]]; }
-holds_compiled_model_cache() { return 1; }
 delete_guard() { echo "UNEXPECTED_GUARD:\$1"; return 1; }
 register_dry_run_cleanup_target() { echo "UNEXPECTED_REGISTER:\$1"; }
 safe_remove() { echo "UNEXPECTED_REMOVE:\$1"; }
@@ -659,18 +609,6 @@ EOF
     [[ "$output" != *"system preview included"* ]]
 }
 
-@test "MOLE_DRY_RUN enables the complete clean preview without deleting Trash" {
-    mkdir -p "$HOME/.Trash"
-    printf 'keep\n' > "$HOME/.Trash/env-dry-run-sentinel"
-
-    run env HOME="$HOME" MOLE_TEST_MODE=1 MOLE_DRY_RUN=1 \
-        "$PROJECT_ROOT/mole" clean
-
-    [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"Dry Run Mode"* ]] || return 1
-    [[ -f "$HOME/.Trash/env-dry-run-sentinel" ]]
-}
-
 @test "mo clean --dry-run does not probe sudo in test mode" {
     set_mock_sudo_cached
     cat > "$TEST_MOCK_BIN/sudo" << 'MOCK'
@@ -821,91 +759,6 @@ SCRIPT
     [[ "$output" == *"SYSTEM_CLEAN=false"* ]]
 }
 
-@test "cloud and office timeout path uses helper function instead of bash -c" {
-    run /bin/bash -c "grep -Eq 'run_with_shell_timeout 300 run_cloud_and_office_cleanup' '$PROJECT_ROOT/bin/clean.sh'"
-    [ "$status" -eq 0 ]
-
-    run /bin/bash -c "! grep -Eq 'run_with_timeout 300[[:space:]]+bash[[:space:]]+-c' '$PROJECT_ROOT/bin/clean.sh'"
-    [ "$status" -eq 0 ]
-}
-
-@test "mo clean summary separates tracked cleanup from free space change" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow"
-    fi
-    local mock_bin="$HOME/bin"
-    mkdir -p "$mock_bin"
-    cat > "$mock_bin/df" << 'MOCK'
-#!/bin/bash
-count_file="${MOLE_DF_COUNT:?}"
-count=0
-if [[ -f "$count_file" ]]; then
-    count=$(cat "$count_file")
-fi
-count=$((count + 1))
-printf '%s\n' "$count" > "$count_file"
-
-available=73400320
-if [[ "$count" -ge 2 ]]; then
-    available=74400320
-fi
-
-printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
-printf '/dev/disk1 200000000 126599680 %s 64%% /\n' "$available"
-MOCK
-    chmod +x "$mock_bin/df"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" MOLE_DF_COUNT="$HOME/df.count" MOLE_TEST_MODE=0 /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/bin/clean.sh"
-
-DRY_RUN=false
-SYSTEM_CLEAN=false
-EXTERNAL_VOLUME_TARGET=""
-WHITELIST_PATTERNS=()
-WHITELIST_WARNINGS=()
-
-check_tcc_permissions() { :; }
-start_section() { :; }
-end_section() { :; }
-log_operation_session_end() { :; }
-run_with_shell_timeout() { shift; "$@"; }
-
-clean_user_essentials() {
-    total_size_cleaned=$((total_size_cleaned + 1000000))
-    files_cleaned=$((files_cleaned + 1))
-    total_items=$((total_items + 1))
-}
-clean_finder_metadata() { :; }
-clean_app_caches() { :; }
-clean_browsers() { :; }
-run_cloud_and_office_cleanup() { :; }
-clean_developer_tools() { :; }
-clean_user_gui_applications() { :; }
-clean_virtualization_tools() { :; }
-clean_application_support_logs() { :; }
-clean_orphaned_app_data() { :; }
-clean_orphaned_system_services() { :; }
-clean_orphaned_container_stubs() { :; }
-show_user_launch_agent_hint_notice() { :; }
-clean_apple_silicon_caches() { :; }
-clean_cached_device_firmware() { :; }
-clean_time_machine_failed_backups() { :; }
-check_large_file_candidates() { :; }
-show_project_artifact_hint_notice() { :; }
-
-perform_cleanup
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Free space: 75.16GB"* ]] || return 1
-    [[ "$output" == *"Tracked cleanup:"* ]] || return 1
-    [[ "$output" == *"1.02GB"* ]] || return 1
-    [[ "$output" == *"Free space: 76.19GB (+1.02GB)"* ]] || return 1
-    [[ "$output" != *"Space freed:"* ]] || return 1
-    [ "$(cat "$HOME/df.count")" = "2" ]
-}
-
 @test "mo clean --dry-run survives an unwritable TMPDIR" {
     local blocked_tmp="$HOME/blocked-tmp"
     mkdir -p "$blocked_tmp"
@@ -937,101 +790,7 @@ EOF
     [ -f "$HOME/Library/Caches/TestApp/cache.tmp" ]
 }
 
-@test "mo clean --dry-run reports stale login item without deleting it" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow"
-    fi
-    mkdir -p "$HOME/Library/LaunchAgents"
-    cat > "$HOME/Library/LaunchAgents/com.example.stale.plist" << 'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.example.stale</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/Applications/Missing.app/Contents/MacOS/Missing</string>
-    </array>
-</dict>
-</plist>
-PLIST
-
-    # MOLE_TEST_MODE=1 short-circuits clean into a stub that never reaches
-    # the App leftovers section, so the report assertion needs the real
-    # sections to run. Dry-run keeps this side-effect free.
-    set_mock_host_toolchains
-    run env HOME="$HOME" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 \
-        PATH="$MOCK_TOOLCHAIN_BIN:$PATH" "$PROJECT_ROOT/mole" clean --dry-run
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Stale login item · ~/Library/LaunchAgents/com.example.stale.plist"* ]] || return 1
-    [[ "$output" == *"review before removing"* ]] || return 1
-    [ -f "$HOME/Library/LaunchAgents/com.example.stale.plist" ]
-}
-
-@test "mo clean --dry-run does not export duplicate targets across sections" {
-    mkdir -p "$HOME/Library/Application Support/Code/CachedData"
-    echo "cache" > "$HOME/Library/Application Support/Code/CachedData/data.bin"
-
-    set_mock_host_toolchains
-    run env HOME="$HOME" MOLE_TEST_MODE=0 \
-        PATH="$MOCK_TOOLCHAIN_BIN:$PATH" "$PROJECT_ROOT/mole" clean --dry-run
-    [ "$status" -eq 0 ]
-
-    run grep -c "Application Support/Code/CachedData" "$HOME/.config/mole/clean-list.txt"
-    [ "$status" -eq 0 ]
-    [ "$output" -eq 1 ]
-}
-
-@test "mo clean --dry-run keeps container totals and preview paths consistent (#1282)" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow"
-    fi
-    # This assertion depends on an exact total. Give it a private HOME so
-    # hidden directories left by earlier cases cannot add cleanup candidates.
-    local test_home
-    test_home="$(mktemp -d "${BATS_TEST_TMPDIR}/clean-1282-home.XXXXXX")"
-    mkdir -p "$test_home/.config/mole"
-
-    local explicit_cache="$test_home/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches"
-    local generic_cache="$test_home/Library/Containers/com.example.generic/Data/Library/Caches"
-    local compiled_cache="$generic_cache/com.apple.e5rt.e5bundlecache"
-    local whitelisted_cache="$test_home/Library/Containers/com.example.whitelisted/Data/Library/Caches"
-    local protected_cache="$test_home/Library/Containers/com.apple.Safari/Data/Library/Caches"
-    mkdir -p "$explicit_cache" "$generic_cache" "$compiled_cache" "$whitelisted_cache" "$protected_cache"
-    dd if=/dev/zero of="$explicit_cache/explicit.bin" bs=1024 count=1024 2> /dev/null
-    dd if=/dev/zero of="$generic_cache/generic.bin" bs=1024 count=1024 2> /dev/null
-    dd if=/dev/zero of="$compiled_cache/model.bin" bs=1024 count=1024 2> /dev/null
-    dd if=/dev/zero of="$whitelisted_cache/keep.bin" bs=1024 count=1024 2> /dev/null
-    dd if=/dev/zero of="$protected_cache/protected.bin" bs=1024 count=1024 2> /dev/null
-    printf '%s\n' "$whitelisted_cache/keep.bin" > "$test_home/.config/mole/whitelist"
-    set_mock_sudo_uncached "$test_home"
-    set_mock_host_toolchains "$test_home"
-    run env HOME="$test_home" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 \
-        PATH="$TEST_MOCK_BIN:$MOCK_TOOLCHAIN_BIN:$PATH" \
-        "$PROJECT_ROOT/mole" clean --dry-run
-
-    [ "$status" -eq 0 ] || return 1
-    local preview="$test_home/.config/mole/clean-list.txt"
-    [[ -f "$preview" ]] || return 1
-    [[ "$(grep -cF "$explicit_cache/explicit.bin" "$preview")" -eq 1 ]] || return 1
-    [[ "$(grep -cF "$generic_cache/generic.bin" "$preview")" -eq 1 ]] || return 1
-    [[ "$(grep -cF "$compiled_cache/model.bin" "$preview")" -eq 0 ]] || return 1
-    [[ "$(grep -cF "$whitelisted_cache/keep.bin" "$preview")" -eq 0 ]] || return 1
-    [[ "$(grep -cF "$protected_cache/protected.bin" "$preview")" -eq 0 ]] || return 1
-    local preview_total preview_items preview_categories
-    preview_total=$(sed -n 's/^# Potential cleanup: //p' "$preview")
-    preview_items=$(sed -n 's/^# Items: //p' "$preview")
-    preview_categories=$(sed -n 's/^# Categories: //p' "$preview")
-    [[ -n "$preview_total" && "$preview_items" =~ ^[0-9]+$ && "$preview_categories" =~ ^[0-9]+$ ]] || return 1
-    [[ "$output" != *"Category total"* ]] || return 1
-    printf '%s\n' "$output" | grep -F "Potential space:" |
-        grep -F "Items: $preview_items" |
-        grep -F "Categories: $preview_categories" |
-        grep -qF "$preview_total" || return 1
-}
-
-@test "dry-run ledger keeps shell-timeout child candidates and unknown sizes" {
+@test "dry-run ledger keeps worker-recorded candidates and unknown sizes" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
         bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -1048,7 +807,11 @@ touch "$candidate"
 record_timeout_candidate() {
     record_dry_run_cleanup_target "$candidate" 0 1 false
 }
-run_with_shell_timeout 5 record_timeout_candidate < /dev/null
+# The sweep records from a timeout worker: a child shell whose in-memory
+# writes die with it, leaving only the file-backed ledger for the parent.
+(
+    record_timeout_candidate
+) < /dev/null
 
 render_clean_preview_from_ledger
 printf 'PARTIAL=%s\n' "$DRY_RUN_TOTAL_PARTIAL"
@@ -1083,11 +846,9 @@ MOCK
     # Dry-run must not list the family even though the sweep reaches it: a
     # live WAL-mode database stays put, and the preview must agree with the
     # real run so the promised totals are the ones actually reclaimable.
-    # Real-run preservation is pinned at the deletion boundary by
     # validate_path_for_deletion (tests/core_safe_functions.bats).
-    set_mock_host_toolchains
     run env HOME="$test_home" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 \
-        PATH="$test_home/toolchain-bin:$MOCK_TOOLCHAIN_BIN:$PATH" "$PROJECT_ROOT/mole" clean --dry-run
+        PATH="$test_home/toolchain-bin:$PATH" "$PROJECT_ROOT/mole" clean --dry-run
     [ "$status" -eq 0 ] || return 1
     [[ "$(grep -cF "Cache.db" "$test_home/.config/mole/clean-list.txt")" -eq 0 ]] || return 1
     [[ -f "$db" && -f "$db-wal" && -f "$db-shm" ]] || return 1
@@ -1152,295 +913,6 @@ EOF
         echo "$output"
         return 1
     }
-}
-
-@test "FINDER_METADATA_SENTINEL in whitelist protects .DS_Store files" {
-    mkdir -p "$HOME/Documents"
-    touch "$HOME/Documents/.DS_Store"
-
-    # The sentinel's value is FINDER_METADATA; FINDER_METADATA_SENTINEL is the
-    # variable name and matches nothing in a whitelist file.
-    cat > "$HOME/.config/mole/whitelist" << EOF
-FINDER_METADATA
-EOF
-
-    # Two halves of the real mechanism: load_whitelist must surface the sentinel so
-    # bin/clean.sh's scan can see it, and clean_finder_metadata must bail once that
-    # scan has flipped the flag. The previous version called is_whitelisted, which
-    # answers "is this exact pattern already in the whitelist" for the management UI
-    # and never matches a file path, so it asserted nothing.
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'SCRIPT'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/manage/whitelist.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-load_whitelist
-sentinel_loaded=false
-if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
-    for entry in "${WHITELIST_PATTERNS[@]}"; do
-        if [[ "$entry" == "$FINDER_METADATA_SENTINEL" ]]; then
-            sentinel_loaded=true
-            break
-        fi
-    done
-fi
-echo "sentinel_loaded=$sentinel_loaded"
-
-PROTECT_FINDER_METADATA=true
-clean_ds_store_tree() { echo "CLEANED:$1"; }
-clean_finder_metadata
-echo "done"
-SCRIPT
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"sentinel_loaded=true"* ]] || return 1
-    [[ "$output" != *"CLEANED:"* ]] || return 1
-    [[ "$output" == *"done"* ]] || return 1
-    [ -f "$HOME/Documents/.DS_Store" ]
-}
-
-@test "custom whitelist without FINDER_METADATA still protects .DS_Store via safety merge (#1396)" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow"
-    fi
-    mkdir -p "$HOME/Documents" "$HOME/.config/mole"
-    touch "$HOME/Documents/.DS_Store"
-    # Pre-FINDER_METADATA user file: custom path only, no sentinel.
-    printf '%s\n' "$HOME/.cache/custom-keep/*" > "$HOME/.config/mole/whitelist"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'SCRIPT'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-
-# Mirror bin/clean.sh load + safety merge + protect flag.
-declare -a WHITELIST_PATTERNS=()
-while IFS= read -r line; do
-    [[ -z "$line" || "$line" =~ ^# ]] && continue
-    WHITELIST_PATTERNS+=("$line")
-done < "$HOME/.config/mole/whitelist"
-ensure_safety_whitelist_patterns
-
-PROTECT_FINDER_METADATA=false
-for entry in "${WHITELIST_PATTERNS[@]}"; do
-    if [[ "$entry" == "$FINDER_METADATA_SENTINEL" ]]; then
-        PROTECT_FINDER_METADATA=true
-        break
-    fi
-done
-echo "protect=$PROTECT_FINDER_METADATA"
-
-clean_ds_store_tree() { echo "CLEANED:$1"; }
-clean_finder_metadata
-echo "done"
-SCRIPT
-
-    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [[ "$output" == *"protect=true"* ]] || { echo "$output"; return 1; }
-    [[ "$output" != *"CLEANED:"* ]] || { echo "$output"; return 1; }
-    [[ "$output" == *"done"* ]] || return 1
-    [ -f "$HOME/Documents/.DS_Store" ]
-}
-
-@test "_clean_recent_items removes shared file lists" {
-    local shared_dir="$HOME/Library/Application Support/com.apple.sharedfilelist"
-    mkdir -p "$shared_dir"
-    touch "$shared_dir/com.apple.LSSharedFileList.RecentApplications.sfl2"
-    touch "$shared_dir/com.apple.LSSharedFileList.RecentDocuments.sfl2"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-safe_clean() {
-    echo "safe_clean $1"
-}
-_clean_recent_items
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Recent"* ]]
-}
-
-@test "_clean_recent_items handles missing shared directory" {
-    rm -rf "$HOME/Library/Application Support/com.apple.sharedfilelist"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-safe_clean() {
-    echo "safe_clean $1"
-}
-_clean_recent_items
-EOF
-
-    [ "$status" -eq 0 ]
-}
-
-@test "_clean_mail_downloads skips cleanup when size below threshold" {
-    mkdir -p "$HOME/Library/Mail Downloads"
-    echo "test" > "$HOME/Library/Mail Downloads/small.txt"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-_clean_mail_downloads
-EOF
-
-    [ "$status" -eq 0 ]
-    [ -f "$HOME/Library/Mail Downloads/small.txt" ]
-}
-
-@test "_clean_mail_downloads removes old attachments" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow"
-    fi
-    mkdir -p "$HOME/Library/Mail Downloads"
-    touch "$HOME/Library/Mail Downloads/old.pdf"
-    touch -t 202301010000 "$HOME/Library/Mail Downloads/old.pdf"
-
-    if command -v mkfile > /dev/null 2>&1; then
-        mkfile -n 6000k "$HOME/Library/Mail Downloads/dummy.dat"
-    else
-        truncate -s 6000k "$HOME/Library/Mail Downloads/dummy.dat"
-    fi
-
-    [ -f "$HOME/Library/Mail Downloads/old.pdf" ]
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-_clean_mail_downloads
-EOF
-
-    [ "$status" -eq 0 ]
-    [ ! -f "$HOME/Library/Mail Downloads/old.pdf" ]
-}
-
-@test "_clean_mail_downloads uses dry-run wording and keeps attachments" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow"
-    fi
-    mkdir -p "$HOME/Library/Mail Downloads"
-    touch "$HOME/Library/Mail Downloads/old.pdf"
-    touch -t 202301010000 "$HOME/Library/Mail Downloads/old.pdf"
-
-    # MOLE_MAIL_DOWNLOADS_MIN_KB is readonly in base.sh, so an env override is
-    # discarded and the sweep stays below threshold. Grow the directory instead,
-    # the same way the non-dry-run case above does.
-    if command -v mkfile > /dev/null 2>&1; then
-        mkfile -n 6000k "$HOME/Library/Mail Downloads/dummy.dat"
-    else
-        truncate -s 6000k "$HOME/Library/Mail Downloads/dummy.dat"
-    fi
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-pgrep() { return 1; }
-_clean_mail_downloads
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Would clean 1 mail attachments"* ]] || return 1
-    [[ "$output" != *"Cleaned 1 mail attachments"* ]] || return 1
-    [ -f "$HOME/Library/Mail Downloads/old.pdf" ]
-}
-
-@test "clean_time_machine_failed_backups detects running backup correctly" {
-    if ! command -v tmutil > /dev/null 2>&1; then
-        skip "tmutil not available"
-    fi
-
-    local mock_bin="$HOME/bin"
-    mkdir -p "$mock_bin"
-
-    cat > "$mock_bin/tmutil" << 'MOCK_TMUTIL'
-#!/bin/bash
-if [[ "$1" == "status" ]]; then
-    cat << 'TMUTIL_OUTPUT'
-Backup session status:
-{
-    ClientID = "com.apple.backupd";
-    Running = 0;
-}
-TMUTIL_OUTPUT
-elif [[ "$1" == "destinationinfo" ]]; then
-    cat << 'DEST_OUTPUT'
-====================================================
-Name          : TestBackup
-Kind          : Local
-Mount Point   : /Volumes/TestBackup
-ID            : 12345678-1234-1234-1234-123456789012
-====================================================
-DEST_OUTPUT
-fi
-MOCK_TMUTIL
-    chmod +x "$mock_bin/tmutil"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/system.sh"
-
-defaults() { echo "1"; }
-
-
-clean_time_machine_failed_backups
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" != *"Time Machine cleanup · skipped (backup in progress)"* ]]
-}
-
-@test "clean_time_machine_failed_backups skips when backup is actually running" {
-    if ! command -v tmutil > /dev/null 2>&1; then
-        skip "tmutil not available"
-    fi
-
-    local mock_bin="$HOME/bin"
-    mkdir -p "$mock_bin"
-
-    cat > "$mock_bin/tmutil" << 'MOCK_TMUTIL'
-#!/bin/bash
-if [[ "$1" == "status" ]]; then
-    cat << 'TMUTIL_OUTPUT'
-Backup session status:
-{
-    ClientID = "com.apple.backupd";
-    Running = 1;
-}
-TMUTIL_OUTPUT
-elif [[ "$1" == "destinationinfo" ]]; then
-    cat << 'DEST_OUTPUT'
-====================================================
-Name          : TestBackup
-Kind          : Local
-Mount Point   : /Volumes/TestBackup
-ID            : 12345678-1234-1234-1234-123456789012
-====================================================
-DEST_OUTPUT
-fi
-MOCK_TMUTIL
-    chmod +x "$mock_bin/tmutil"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/system.sh"
-
-defaults() { echo "1"; }
-
-
-clean_time_machine_failed_backups
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Time Machine cleanup · skipped (backup in progress)"* ]]
 }
 
 @test "start_section recycles an idle section header in place on a TTY" {
@@ -1511,29 +983,6 @@ EOF
     [[ "$output" != *"Nothing to clean"* ]] || return 1
 }
 
-@test "safe_clean skips caches that hold a compiled model cache" {
-    export_file="$HOME/e5rt-list.txt"
-    # shellcheck disable=SC2016  # inner bash expands these from its environment
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-        /bin/bash --noprofile --norc -c '
-            source "$PROJECT_ROOT/bin/clean.sh"
-            DRY_RUN=true
-            # Set after sourcing: clean.sh assigns EXPORT_LIST_FILE at load time.
-            EXPORT_LIST_FILE="$HOME/e5rt-list.txt"
-            : > "$EXPORT_LIST_FILE"
-            e5rt_cache="$HOME/Library/Caches/com.example.ocr/com.apple.e5rt.e5bundlecache"
-            mkdir -p "$e5rt_cache" "$HOME/Library/Caches/com.example.plain"
-            # Both need real bytes: zero-sized entries never reach the export list.
-            dd if=/dev/zero of="$e5rt_cache/model.e5" bs=1024 count=200 2> /dev/null
-            dd if=/dev/zero of="$HOME/Library/Caches/com.example.plain/junk" bs=1024 count=300 2> /dev/null
-            safe_clean "$HOME"/Library/Caches/* "User app cache"
-        '
-    [ "$status" -eq 0 ] || return 1
-    list_content="$(cat "$export_file")"
-    [[ "$list_content" == *"com.example.plain"* ]] || return 1
-    [[ "$list_content" != *"com.example.ocr"* ]] || return 1
-}
-
 @test "active clean sections rely on the final total" {
     # shellcheck disable=SC2016  # inner bash expands these from its environment
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
@@ -1575,7 +1024,9 @@ EOF
             source "$PROJECT_ROOT/bin/clean.sh"
             DEFERRED_CLEANUP_FAMILIES=()
             DEFERRED_CLEANUP_FAMILIES_FILE=$(create_temp_file)
-            run_with_shell_timeout 5 defer_cleanup_family "Dropbox"
+            # A timeout worker is a child shell: its array write dies with
+            # it, but the file-backed record survives for the parent replay.
+            ( defer_cleanup_family "Dropbox" )
             sync_deferred_cleanup_families
             format_deferred_cleanup_families
         '
@@ -1658,15 +1109,14 @@ EOF
     [[ "$output" == *"Nothing to clean"* ]] || return 1
     [[ "$output" != *"Category total"* ]] || return 1
 }
-
 @test "cleanup libs share one engine-absent shim instead of forking their own" {
     # bin/clean.sh owns the deferred-family ledger and is the only production
     # entry point that sources lib/clean/*, so a cleanup lib reaches it through
-    # a `declare -f` probe. Three byte-identical copies of that probe grew in
-    # dev.sh, user.sh, and app_caches.sh before it was hoisted into
-    # mole_defer_cleanup_family. Pin the shape so a fourth cannot appear: a
-    # forked copy drifts silently, and this one sits on the path that decides
-    # whether a running app's cache is left alone.
+    # a `declare -f` probe. Byte-identical copies of that probe grew across
+    # the cleanup libs before it was hoisted into mole_defer_cleanup_family.
+    # Pin the shape so another copy cannot appear: a forked copy drifts
+    # silently, and this one sits on the path that decides whether a running
+    # app's cache is left alone.
     local shim_definitions
     shim_definitions=$(command grep -rn 'declare -f defer_cleanup_family' "$PROJECT_ROOT/lib" | wc -l | tr -d ' ')
     [ "$shim_definitions" -eq 1 ] || {
@@ -1684,17 +1134,17 @@ EOF
     # Each `declare -f safe_clean_guarded` branch is a second, degraded copy of
     # the delete guard: production always has bin/clean.sh loaded and never runs
     # them, while standalone Bats cases always do. That split is tolerated for
-    # the ten audited sites and must not grow, because every new one is another
-    # place the guarded and unguarded verdicts can disagree without a user ever
-    # exercising the branch that was reviewed.
+    # the three audited sites (all in dev.sh) and must not grow, because every
+    # new one is another place the guarded and unguarded verdicts can disagree
+    # without a user ever exercising the branch that was reviewed.
     #
     # Adding cleanup code? Call safe_clean_guarded directly and let the test
-    # provide it, rather than hand-rolling an eleventh fallback. Lowering this
+    # provide it, rather than hand-rolling a fourth fallback. Lowering this
     # baseline after removing one is expected; raising it needs a stated reason.
     local fallbacks
     fallbacks=$(command grep -rn 'declare -f safe_clean_guarded' "$PROJECT_ROOT/lib" | wc -l | tr -d ' ')
-    [ "$fallbacks" -eq 10 ] || {
-        echo "engine-absent fallback count is $fallbacks, audited baseline is 10:"
+    [ "$fallbacks" -eq 3 ] || {
+        echo "engine-absent fallback count is $fallbacks, audited baseline is 3:"
         command grep -rn 'declare -f safe_clean_guarded' "$PROJECT_ROOT/lib"
         return 1
     }

@@ -1,8 +1,8 @@
 #!/bin/bash
 # Mole - Installer command
-# Find and remove installer files. darwin: .dmg, .pkg, .mpkg, .iso, .xip, .zip
-# linux: *.pkg.tar.zst, *.deb, *.rpm, *.AppImage, *.iso, *.tar.gz, *.tar.xz and
-# zips containing them; /var/cache/pacman/pkg is summarized report-only.
+# Find and remove installer files: *.pkg.tar.zst, *.deb, *.rpm, *.AppImage,
+# *.iso, *.tar.gz, *.tar.xz and zips containing them; /var/cache/pacman/pkg
+# is summarized report-only.
 
 set -euo pipefail
 
@@ -32,35 +32,17 @@ trap 'trap - EXIT; cleanup; exit 130' INT TERM
 
 # Scan configuration
 readonly INSTALLER_SCAN_MAX_DEPTH_DEFAULT=2
-if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
-    readonly INSTALLER_SCAN_PATHS=(
-        "$HOME/Downloads"
-        "$HOME/Desktop"
-    )
-    # Linux hunts distribution and app installer formats plus zips that
-    # contain them. /var/cache/pacman/pkg stays report-only (see
-    # INSTALLER_PACMAN_CACHE_DIR): the cache belongs to the package manager,
-    # so it is summarized instead of being offered for deletion.
-    readonly INSTALLER_FILE_EXTENSIONS=(
-        pkg.tar.zst deb rpm AppImage iso tar.gz tar.xz zip
-    )
-else
-    readonly INSTALLER_SCAN_PATHS=(
-        "$HOME/Downloads"
-        "$HOME/Desktop"
-        "$HOME/Documents"
-        "$HOME/Public"
-        "$HOME/Library/Downloads"
-        "/Users/Shared"
-        "/Users/Shared/Downloads"
-        "$HOME/Library/Caches/Homebrew"
-        "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Downloads"
-        "$HOME/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"
-        "$HOME/Library/Application Support/Telegram Desktop"
-        "$HOME/Downloads/Telegram Desktop"
-    )
-    readonly INSTALLER_FILE_EXTENSIONS=(dmg pkg mpkg iso xip zip)
-fi
+readonly INSTALLER_SCAN_PATHS=(
+    "$HOME/Downloads"
+    "$HOME/Desktop"
+)
+# Linux hunts distribution and app installer formats plus zips that
+# contain them. /var/cache/pacman/pkg stays report-only (see
+# INSTALLER_PACMAN_CACHE_DIR): the cache belongs to the package manager,
+# so it is summarized instead of being offered for deletion.
+readonly INSTALLER_FILE_EXTENSIONS=(
+    pkg.tar.zst deb rpm AppImage iso tar.gz tar.xz zip
+)
 readonly INSTALLER_PACMAN_CACHE_DIR="/var/cache/pacman/pkg"
 readonly MAX_ZIP_ENTRIES=50
 readonly INSTALLER_EXIT_INCOMPLETE=3
@@ -84,13 +66,8 @@ is_installer_zip() {
 
     if ! "${ZIP_LIST_CMD[@]}" "$zip" 2> /dev/null |
         head -n "$cap" |
-        awk -v platform="${MOLE_PLATFORM:-darwin}" '
-            platform == "linux" &&
-                /\.(pkg\.tar\.zst|deb|rpm|AppImage|iso|tar\.gz|tar\.xz)(\/|$)/ { found=1; exit 0 }
-            platform != "linux" &&
-                /\.(app|pkg|dmg|xip)(\/|$)/ { found=1; exit 0 }
-            END { exit found ? 0 : 1 }
-        '; then
+        awk '/\.(pkg\.tar\.zst|deb|rpm|AppImage|iso|tar\.gz|tar\.xz)(\/|$)/ { found=1; exit 0 }
+            END { exit found ? 0 : 1 }'; then
         return 1
     fi
 
@@ -138,32 +115,21 @@ scan_installers_in_path() {
 
     local file
 
-    # The fd fast path is kept for darwin's flat extensions. On linux the
-    # extension list has compound suffixes (pkg.tar.zst, tar.gz) that fd -e
-    # matches unreliably, so find with explicit -name globs drives it.
-    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]] && command -v fd > /dev/null 2>&1; then
-        while IFS= read -r file; do
-            handle_candidate_file "$file"
-        done < <(
-            fd --no-ignore --hidden --type f --max-depth "$max_depth" \
-                -e dmg -e pkg -e mpkg -e iso -e xip -e zip \
-                . "$path" 2> /dev/null || true
-        )
-    else
-        local -a name_args=()
-        local ext
-        for ext in "${INSTALLER_FILE_EXTENSIONS[@]}"; do
-            [[ ${#name_args[@]} -gt 0 ]] && name_args+=(-o)
-            name_args+=(-name "*.$ext")
-        done
-        while IFS= read -r file; do
-            handle_candidate_file "$file"
-        done < <(
-            find "$path" -maxdepth "$max_depth" -type f \
-                \( "${name_args[@]}" \) \
-                2> /dev/null || true
-        )
-    fi
+    # The extension list has compound suffixes (pkg.tar.zst, tar.gz) that
+    # fd -e matches unreliably, so find with explicit -name globs drives it.
+    local -a name_args=()
+    local ext
+    for ext in "${INSTALLER_FILE_EXTENSIONS[@]}"; do
+        [[ ${#name_args[@]} -gt 0 ]] && name_args+=(-o)
+        name_args+=(-name "*.$ext")
+    done
+    while IFS= read -r file; do
+        handle_candidate_file "$file"
+    done < <(
+        find "$path" -maxdepth "$max_depth" -type f \
+            \( "${name_args[@]}" \) \
+            2> /dev/null || true
+    )
 }
 
 scan_all_installers() {
@@ -231,13 +197,6 @@ get_source_display() {
     case "$dir_path" in
         "$HOME/Downloads"*) echo "Downloads" ;;
         "$HOME/Desktop"*) echo "Desktop" ;;
-        "$HOME/Documents"*) echo "Documents" ;;
-        "$HOME/Public"*) echo "Public" ;;
-        "$HOME/Library/Downloads"*) echo "Library" ;;
-        "/Users/Shared"*) echo "Shared" ;;
-        "$HOME/Library/Caches/Homebrew"*) echo "Homebrew" ;;
-        "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Downloads"*) echo "iCloud" ;;
-        "$HOME/Library/Containers/com.apple.mail"*) echo "Mail" ;;
         *"Telegram Desktop"*) echo "Telegram" ;;
         *) echo "${dir_path##*/}" ;;
     esac
@@ -349,16 +308,8 @@ collect_installers() {
         local size_human
         size_human=$(bytes_to_human "$file_size")
 
-        # Get display filename - strip Homebrew hash prefix if present
         local display_name
         display_name=$(basename "$file")
-        if [[ "$source" == "Homebrew" ]]; then
-            # Homebrew names often look like: sha256--name--version
-            # Strip the leading hash if it matches [0-9a-f]{64}--
-            if [[ "$display_name" =~ ^[0-9a-f]{64}--(.*) ]]; then
-                display_name="${BASH_REMATCH[1]}"
-            fi
-        fi
 
         # Format display with alignment
         local display

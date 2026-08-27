@@ -1203,35 +1203,6 @@ check_requirements() {
             ;;
     esac
 
-    if [[ "$MOLE_PLATFORM" == "darwin" ]] && homebrew_owns_mole; then
-        local mole_path
-        mole_path=$(command -v mole 2> /dev/null || true)
-        local is_homebrew_binary=false
-
-        if [[ -n "$mole_path" && -L "$mole_path" ]]; then
-            if readlink "$mole_path" | grep -q "Cellar/mole"; then
-                is_homebrew_binary=true
-            fi
-        fi
-
-        if [[ "$is_homebrew_binary" == "true" ]]; then
-            if [[ "$ACTION" == "update" ]]; then
-                return 0
-            fi
-
-            echo -e "${YELLOW}Mole is installed via Homebrew${NC}"
-            echo ""
-            echo "Choose one:"
-            echo -e "  1. Update via Homebrew: ${GREEN}brew upgrade mole${NC}"
-            echo -e "  2. Switch to manual: ${GREEN}brew uninstall --force mole${NC} then re-run this"
-            echo ""
-            exit 1
-        else
-            log_warning "Cleaning up stale Homebrew installation..."
-            brew uninstall --force mole > /dev/null 2>&1 || true
-        fi
-    fi
-
     if [[ ! -d "$(dirname "$INSTALL_DIR")" ]]; then
         log_error "Parent directory $(dirname "$INSTALL_DIR") does not exist"
         exit 1
@@ -1655,29 +1626,6 @@ print_usage_summary() {
     echo ""
 }
 
-# Whether Homebrew owns a mole install, decided from the Cellar on disk and
-# never by running `brew`: the brew entry point resets the user's sudo
-# timestamp as a security measure, and invoking it after the update flow's
-# pre-authentication is exactly what killed the handed-over ticket within
-# five seconds and forced a second password prompt on every update, with
-# the ticket dying between installer start and the first privileged step.
-homebrew_owns_mole() {
-    local -a brew_prefixes=("${HOMEBREW_PREFIX:-}" /opt/homebrew /usr/local)
-    # A custom prefix need not export HOMEBREW_PREFIX, and `brew list mole`
-    # used to find those installs. Derive the prefix from brew's own location
-    # instead: reading the path is not running the binary.
-    local brew_bin=""
-    brew_bin=$(command -v brew 2> /dev/null || true)
-    if [[ -n "$brew_bin" ]]; then
-        brew_prefixes+=("$(dirname "$(dirname "$brew_bin")")")
-    fi
-    local brew_prefix
-    for brew_prefix in "${brew_prefixes[@]}"; do
-        [[ -n "$brew_prefix" && -d "$brew_prefix/Cellar/mole" ]] && return 0
-    done
-    return 1
-}
-
 # Main install/update flows
 perform_install() {
     resolve_source_dir
@@ -1724,24 +1672,6 @@ perform_install() {
 
 perform_update() {
     check_requirements
-
-    if [[ "$MOLE_PLATFORM" == "darwin" ]] && homebrew_owns_mole; then
-        resolve_source_dir 2> /dev/null || true
-        local current_version
-        current_version=$(get_installed_version || echo "unknown")
-        if [[ -f "$SOURCE_DIR/lib/core/common.sh" ]]; then
-            # shellcheck disable=SC1090,SC1091
-            source "$SOURCE_DIR/lib/core/common.sh"
-            update_via_homebrew "$current_version"
-        else
-            log_error "Cannot update Homebrew-managed Mole without full installation"
-            echo ""
-            echo "Please update via Homebrew:"
-            echo -e "  ${GREEN}brew upgrade mole${NC}"
-            exit 1
-        fi
-        exit 0
-    fi
 
     local installed_version
     installed_version="$(get_installed_version || true)"

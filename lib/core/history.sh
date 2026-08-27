@@ -56,10 +56,8 @@ HISTORY_ACTIVE_FAILED_TASKS=0
 _mole_history_state_dir() {
     if command -v mole_state_dir > /dev/null 2>&1; then
         mole_state_dir
-    elif [[ "$(uname -s)" == "Linux" ]]; then
-        printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/mole"
     else
-        printf '%s\n' "$HOME/Library/Logs/mole"
+        printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/mole"
     fi
 }
 

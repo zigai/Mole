@@ -28,96 +28,30 @@ _optimize_catalog_register() {
     MOLE_OPTIMIZE_SAFE_VALUES[index]="$6"
 }
 
-if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
-    # Linux actions back onto the distro capability contract (lib/platform/linux/*).
-    # Queries answer immediately; plans are previewed and executed by the
-    # handlers in tasks.sh through the shared dry-run + sudo plumbing.
-    _optimize_catalog_register pkg_cache_trim opt_pkg_cache_trim \
-        "Package Cache Trim" "Package Cache Trim" \
-        "Trim package manager cache, keeping recent versions" true
-    _optimize_catalog_register journal_vacuum opt_journal_vacuum \
-        "Journal Vacuum" "Journal Vacuum" \
-        "Shrink the systemd journal to 100M / 2 weeks" true
-    _optimize_catalog_register orphan_packages opt_orphan_packages \
-        "Orphaned Packages" "Orphaned Packages" \
-        "Report packages orphaned by upgrades and offer their removal" true
-    _optimize_catalog_register flatpak_unused opt_flatpak_unused \
-        "Flatpak Cleanup" "Flatpak Cleanup" \
-        "Uninstall unused Flatpak runtimes and extensions" true
-    _optimize_catalog_register ssd_trim opt_ssd_trim \
-        "SSD TRIM" "SSD TRIM" \
-        "Discard unused blocks on SSDs via fstrim -av" true
-    _optimize_catalog_register failed_units_report opt_failed_units_report \
-        "Failed Units Report" "Failed Units Report" \
-        "List failed systemd units (read-only)" true
-    _optimize_catalog_register dns_cache_flush opt_dns_cache_flush \
-        "DNS Cache Flush" "DNS Cache Flush" \
-        "Flush the systemd-resolved DNS cache" true
-else
-    _optimize_catalog_register system_maintenance opt_system_maintenance \
-        "DNS & Spotlight Check" "DNS & Spotlight Check" \
-        "Refresh DNS cache & verify Spotlight status" true
-    _optimize_catalog_register cache_refresh opt_cache_refresh \
-        "Finder Cache Refresh" "Finder Cache Refresh" \
-        "Refresh QuickLook thumbnails & icon services cache" true
-    _optimize_catalog_register saved_state_cleanup opt_saved_state_cleanup \
-        "App State Cleanup" "App State Cleanup" \
-        "Remove old saved application states (30+ days)" true
-    _optimize_catalog_register fix_broken_configs opt_fix_broken_configs \
-        "Broken Config Repair" "Broken Config Repair" \
-        "Fix corrupted preferences files" true
-    _optimize_catalog_register network_optimization opt_network_optimization \
-        "Network Cache Refresh" "Network Cache Refresh" \
-        "Optimize DNS cache & restart mDNSResponder" true
-    _optimize_catalog_register sqlite_vacuum opt_sqlite_vacuum \
-        "Database Optimization" "Database Optimization" \
-        "Compress SQLite databases for Mail, Safari & Messages (skips if apps are running)" true
-    _optimize_catalog_register launch_services_rebuild opt_launch_services_rebuild \
-        "LaunchServices Repair" "LaunchServices Repair" \
-        'Repair "Open with" menu & file associations' true
-    _optimize_catalog_register prevent_network_dsstore opt_prevent_network_dsstore \
-        "Prevent Finder .DS_Store" "Prevent Finder .DS_Store" \
-        "Set a persistent Finder preference to stop writing .DS_Store on SMB/AFP/NFS and USB volumes" true
-    _optimize_catalog_register legacy_overrides_audit opt_legacy_overrides_audit \
-        "Legacy Overrides" "Legacy Overrides" \
-        "Remove hidden App Nap and disk-image verification overrides left by old tweak tools" true
-    _optimize_catalog_register network_stack_optimize opt_network_stack_optimize \
-        "Network Stack Refresh" "Network Stack Refresh" \
-        "Flush routing table and ARP cache to resolve network issues" true
-    _optimize_catalog_register disk_permissions_repair opt_disk_permissions_repair \
-        "Permission Repair" "Permission Repair" \
-        "Fix user directory permission issues" true
-    _optimize_catalog_register spotlight_index_optimize opt_spotlight_index_optimize \
-        "Spotlight Optimization" "Spotlight Optimization" \
-        "Rebuild index if search is slow (smart detection)" true
-    _optimize_catalog_register spotlight_orphan_rules_cleanup opt_prune_spotlight_orphan_rules \
-        "Spotlight Orphan Rules" "Spotlight Orphan Rules" \
-        "Remove Spotlight search-rule entries for apps that are no longer installed" true
-    _optimize_catalog_register periodic_maintenance opt_periodic_maintenance \
-        "Periodic Maintenance" "Periodic Maintenance" \
-        "Run macOS daily/weekly/monthly maintenance scripts if stale" true
-    _optimize_catalog_register shared_file_list_repair opt_shared_file_list_repair \
-        "Shared File Lists" "Shared File Lists" \
-        "Repair corrupted Finder favorites and recent documents" true
-    _optimize_catalog_register disk_verify opt_disk_verify \
-        "Disk Health" "Disk Health" \
-        "Verify filesystem integrity" true
-    _optimize_catalog_register login_items_audit opt_login_items_audit \
-        "Login Items" "Login Items Audit" \
-        "Audit login items for broken entries" true
-    _optimize_catalog_register quarantine_cleanup opt_quarantine_cleanup \
-        "Quarantine Database Cleanup" "Quarantine Database Cleanup" \
-        "Clear Gatekeeper download tracking history" true
-    _optimize_catalog_register launch_agents_cleanup opt_launch_agents_cleanup \
-        "Launch Agents Cleanup" "Launch Agents Cleanup" \
-        "Remove broken LaunchAgents whose binaries no longer exist" true
-    _optimize_catalog_register notification_cleanup opt_notification_cleanup \
-        "Notifications" "Notifications" \
-        "Clean old delivered notifications to reduce database bloat" true
-    _optimize_catalog_register coreduet_cleanup opt_coreduet_cleanup \
-        "Usage Data" "Usage Data" \
-        "Clean old usage tracking data" true
-fi
+# Linux actions back onto the distro capability contract (lib/platform/linux/*).
+# Queries answer immediately; plans are previewed and executed by the
+# handlers in tasks.sh through the shared dry-run + sudo plumbing.
+_optimize_catalog_register pkg_cache_trim opt_pkg_cache_trim \
+    "Package Cache Trim" "Package Cache Trim" \
+    "Trim package manager cache, keeping recent versions" true
+_optimize_catalog_register journal_vacuum opt_journal_vacuum \
+    "Journal Vacuum" "Journal Vacuum" \
+    "Shrink the systemd journal to 100M / 2 weeks" true
+_optimize_catalog_register orphan_packages opt_orphan_packages \
+    "Orphaned Packages" "Orphaned Packages" \
+    "Report packages orphaned by upgrades and offer their removal" true
+_optimize_catalog_register flatpak_unused opt_flatpak_unused \
+    "Flatpak Cleanup" "Flatpak Cleanup" \
+    "Uninstall unused Flatpak runtimes and extensions" true
+_optimize_catalog_register ssd_trim opt_ssd_trim \
+    "SSD TRIM" "SSD TRIM" \
+    "Discard unused blocks on SSDs via fstrim -av" true
+_optimize_catalog_register failed_units_report opt_failed_units_report \
+    "Failed Units Report" "Failed Units Report" \
+    "List failed systemd units (read-only)" true
+_optimize_catalog_register dns_cache_flush opt_dns_cache_flush \
+    "DNS Cache Flush" "DNS Cache Flush" \
+    "Flush the systemd-resolved DNS cache" true
 
 optimize_catalog_index_for() {
     local requested_action="$1"

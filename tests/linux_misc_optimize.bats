@@ -48,35 +48,6 @@ EOF
     [[ "$output" != *"system_maintenance"* ]]
 }
 
-@test "darwin keeps the historical action set untouched" {
-    run env MOLE_PLATFORM=darwin /bin/bash --noprofile --norc <<EOF
-set -uo pipefail
-source '$PROJECT_ROOT/lib/optimize/catalog.sh'
-echo "count=\${#MOLE_OPTIMIZE_ACTIONS[@]}"
-printf '%s\n' "\${MOLE_OPTIMIZE_ACTIONS[@]}"
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"count=21"* ]]
-    [[ "$output" == *"system_maintenance"* ]]
-    [[ "$output" == *"coreduet_cleanup"* ]]
-    for action in pkg_cache_trim journal_vacuum orphan_packages flatpak_unused ssd_trim failed_units_report dns_cache_flush; do
-        ! grep -qx "$action" <<< "$output"
-    done
-}
-
-@test "unset platform defaults to the darwin catalog (legacy source path)" {
-    run env -u MOLE_PLATFORM /bin/bash --noprofile --norc <<EOF
-set -uo pipefail
-source '$PROJECT_ROOT/lib/optimize/catalog.sh'
-echo "count=\${#MOLE_OPTIMIZE_ACTIONS[@]}"
-printf '%s\n' "\${MOLE_OPTIMIZE_ACTIONS[@]}" | grep -x system_maintenance
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"count=21"* ]]
-}
-
 @test "package cache trim previews the distro plan in dry-run" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=linux MOLE_DRY_RUN=1 \
         /bin/bash --noprofile --norc <<'EOF'

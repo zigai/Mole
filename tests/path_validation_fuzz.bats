@@ -54,11 +54,10 @@ setup() {
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "$line" ]] && continue
 
-        # Uppercase aliases (/SYSTEM, /DEV, ...) rely on APFS case-insensitive
-        # inode identity: on a case-sensitive Linux host they name no existing
-        # file, so the deny-only policy accepts them by design. They stay
-        # fully validated when this suite runs on Darwin.
-        if [[ "$(uname -s)" != "Darwin" && "$line" =~ ^/[A-Z/_]+$ ]]; then
+        # Uppercase aliases (/SYSTEM, /DEV, ...) rely on case-insensitive
+        # inode identity: on this Linux host they name no existing file, so
+        # the deny-only string policy accepts them by design.
+        if [[ "$line" =~ ^/[A-Z/_]+$ ]]; then
             continue
         fi
         run /bin/bash --noprofile --norc -s -- "$line" <<'EOF'
@@ -111,12 +110,9 @@ EOF
     # accepted literally too, and the symlinked form must stay consistent with
     # that (the guard is deny-only, it never invents a stricter policy).
     local root
-    local -a critical_roots=(/System /usr /bin /etc)
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        # /System does not exist on Linux, so a link pointing there dangles
-        # and cannot resolve; exercise the Linux-only critical roots instead.
-        critical_roots=(/proc /sys /usr /bin /etc)
-    fi
+    # A link to a nonexistent root (e.g. /System) dangles and cannot resolve,
+    # so only existing Linux critical roots are exercised here.
+    local -a critical_roots=(/proc /sys /usr /bin /etc)
     for root in "${critical_roots[@]}"; do
         local link="$sandbox/link-${root//\//_}"
         ln -s "$root" "$link"

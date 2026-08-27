@@ -8,8 +8,7 @@ setup_file() {
 	export ORIGINAL_HOME
 
 	# Capture real GOCACHE before HOME is replaced with a temp dir.
-	# Without this, go build would use $HOME/Library/Caches/go-build inside the
-	# temp dir (empty), causing a full cold rebuild on every test run (~6s).
+	# Without this, go build would use a cold cache inside the temp dir,
 	ORIGINAL_GOCACHE="$(go env GOCACHE 2>/dev/null || true)"
 	export ORIGINAL_GOCACHE
 
@@ -55,48 +54,6 @@ teardown_file() {
 	fi
 }
 
-create_fake_utils() {
-	local dir="$1"
-	mkdir -p "$dir"
-
-	cat >"$dir/sudo" <<'SCRIPT'
-#!/usr/bin/env bash
-if [[ "$1" == "-n" || "$1" == "-v" ]]; then
-    exit 0
-fi
-exec "$@"
-SCRIPT
-	chmod +x "$dir/sudo"
-
-	cat >"$dir/bioutil" <<'SCRIPT'
-#!/usr/bin/env bash
-if [[ "$1" == "-r" ]]; then
-    echo "Touch ID: 1"
-    exit 0
-fi
-exit 0
-SCRIPT
-	chmod +x "$dir/bioutil"
-
-	cat >"$dir/chown" <<'SCRIPT'
-#!/usr/bin/env bash
-exit 0
-SCRIPT
-	chmod +x "$dir/chown"
-
-	cat >"$dir/install" <<'SCRIPT'
-#!/usr/bin/env bash
-args=()
-skip_next=""
-for arg in "$@"; do
-    if [[ -n "$skip_next" ]]; then skip_next=""; continue; fi
-    case "$arg" in -o|-g) skip_next=1 ;; *) args+=("$arg") ;; esac
-done
-exec /usr/bin/install "${args[@]}"
-SCRIPT
-	chmod +x "$dir/install"
-}
-
 setup() {
 	# Safety: refuse to operate on a real home directory.
 	if [[ "$HOME" != "${BATS_TEST_DIRNAME}/tmp-"* ]]; then
@@ -121,22 +78,6 @@ setup() {
 	run env HOME="$HOME" "$PROJECT_ROOT/mole" --version
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"$expected_version"* ]]
-}
-
-@test "mole --version does not hang on slow Homebrew detection" {
-	local fake_bin
-	fake_bin="$(mktemp -d "${BATS_TEST_TMPDIR}/fake-bin.XXXXXX")"
-	ln -s "$PROJECT_ROOT/mole" "$fake_bin/mole"
-	cat > "$fake_bin/brew" <<'SCRIPT'
-#!/usr/bin/env bash
-sleep 3
-exit 1
-SCRIPT
-	chmod +x "$fake_bin/brew"
-
-	run env HOME="$HOME" PATH="$fake_bin:$PATH" MOLE_HOMEBREW_DETECT_TIMEOUT=1 "$PROJECT_ROOT/mole" --version
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"Install: Manual"* ]]
 }
 
 @test "mole --version shows nightly channel metadata" {
@@ -198,23 +139,13 @@ EOF
 	# The controls line is rendered only under a tty, so test the pure builder
 	# directly. Both the negative and positive cases run so the assertion
 	# cannot pass vacuously.
-	run /bin/bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line true false"
+	run /bin/bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line false"
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" != *"U Update"* ]] || return 1
 
-	run /bin/bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line true true"
+	run /bin/bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line true"
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"U Update"* ]] || return 1
-
-	# TouchID setup takes precedence: no update shortcut even if one is
-	# ready. TouchID does not exist on linux, where the menu shows the
-	# update shortcut instead.
-	if [[ "$(uname -s)" == "Darwin" ]]; then
-		run /bin/bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line false true"
-		[ "$status" -eq 0 ] || return 1
-		[[ "$output" == *"T TouchID"* ]] || return 1
-		[[ "$output" != *"U Update"* ]] || return 1
-	fi
 }
 
 @test "show_main_menu keeps history out of the primary menu" {
@@ -342,15 +273,6 @@ EOF
 	[[ "$output" != *"LEAK:"* ]]
 }
 
-@test "touchid status reports current configuration" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow"
-	fi
-	run env HOME="$HOME" "$PROJECT_ROOT/mole" touchid status
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"Touch ID"* ]]
-}
-
 @test "mo optimize command is recognized" {
 	run /bin/bash -c "grep -Eq '\"optimi[sz]e\"[[:space:]]*\\|[[:space:]]*\"optimi[sz]e\"' '$PROJECT_ROOT/mole'"
 	[ "$status" -eq 0 ]
@@ -372,13 +294,8 @@ EOF
 	[ "$status" -eq 0 ]
 	MOLE_OUTPUT="$output"
 
-	# Debug logs live under ~/Library/Logs on darwin and under
-	# XDG_STATE_HOME on linux.
-	if [[ "$(uname -s)" == "Darwin" ]]; then
-		DEBUG_LOG="$HOME/Library/Logs/mole/mole_debug_session.log"
-	else
-		DEBUG_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/mole/mole_debug_session.log"
-	fi
+	# Debug logs live under XDG_STATE_HOME.
+	DEBUG_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/mole/mole_debug_session.log"
 	[ -f "$DEBUG_LOG" ]
 
 	run grep "Mole Debug Session" "$DEBUG_LOG"
@@ -387,23 +304,12 @@ EOF
 	[[ "$MOLE_OUTPUT" =~ "Debug session log saved to" ]]
 }
 
-@test "mo clean without debug does not show debug log path" {
-	mkdir -p "$HOME/.config/mole"
-	run env HOME="$HOME" TERM="xterm-256color" MOLE_TEST_MODE=1 MO_DEBUG=0 "$PROJECT_ROOT/mole" clean --dry-run
-	[ "$status" -eq 0 ]
-
-	[[ "$output" != *"Debug session log saved to"* ]]
-}
-
 @test "mo clean --debug logs system info" {
 	mkdir -p "$HOME/.config/mole"
-	# Debug logs live under ~/Library/Logs on darwin and under
-	# XDG_STATE_HOME on linux.
-	if [[ "$(uname -s)" == "Darwin" ]]; then
-		DEBUG_LOG="$HOME/Library/Logs/mole/mole_debug_session.log"
-	else
-		DEBUG_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/mole/mole_debug_session.log"
-	fi
+	DEBUG_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/mole/mole_debug_session.log"
+
+	run env HOME="$HOME" TERM="xterm-256color" MOLE_TEST_MODE=1 MO_DEBUG=1 "$PROJECT_ROOT/mole" clean --dry-run
+	[ "$status" -eq 0 ]
 
 	run grep "User:" "$DEBUG_LOG"
 	[ "$status" -eq 0 ]
@@ -445,152 +351,6 @@ EOF
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Clean External Volume"* ]] || return 1
 	[[ "$output" == *"External volume cleanup"* ]]
-}
-
-@test "touchid status reflects pam file contents" {
-	# pam_tid/pam_opendirectory are macOS PAM modules; linux has no TouchID.
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow"
-	fi
-	pam_file="$HOME/pam_test"
-	cat >"$pam_file" <<'EOF'
-auth       sufficient     pam_opendirectory.so
-EOF
-
-	run env MOLE_PAM_SUDO_FILE="$pam_file" "$PROJECT_ROOT/bin/touchid.sh" status
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"not configured"* ]] || return 1
-
-	cat >"$pam_file" <<'EOF'
-auth       sufficient     pam_tid.so
-EOF
-
-	run env MOLE_PAM_SUDO_FILE="$pam_file" "$PROJECT_ROOT/bin/touchid.sh" status
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"enabled"* ]]
-}
-
-@test "enable_touchid inserts pam_tid line in pam file" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow"
-	fi
-	pam_file="$HOME/pam_enable"
-	cat >"$pam_file" <<'EOF'
-auth       sufficient     pam_opendirectory.so
-EOF
-
-	fake_bin="$HOME/fake-bin"
-	create_fake_utils "$fake_bin"
-
-	run env PATH="$fake_bin:$PATH" MOLE_PAM_SUDO_FILE="$pam_file" "$PROJECT_ROOT/bin/touchid.sh" enable
-	[ "$status" -eq 0 ]
-	grep -q "pam_tid.so" "$pam_file"
-	[[ -f "${pam_file}.mole-backup" ]]
-}
-
-@test "disable_touchid removes pam_tid line" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow"
-	fi
-	pam_file="$HOME/pam_disable"
-	cat >"$pam_file" <<'EOF'
-auth       sufficient     pam_tid.so
-auth       sufficient     pam_opendirectory.so
-EOF
-
-	fake_bin="$HOME/fake-bin-disable"
-	create_fake_utils "$fake_bin"
-
-	run env PATH="$fake_bin:$PATH" MOLE_PAM_SUDO_FILE="$pam_file" "$PROJECT_ROOT/bin/touchid.sh" disable
-	[ "$status" -eq 0 ]
-	run grep "pam_tid.so" "$pam_file"
-	[ "$status" -ne 0 ]
-}
-
-@test "touchid enable --dry-run does not modify pam file" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow"
-	fi
-	pam_file="$HOME/pam_enable_dry_run"
-	cat >"$pam_file" <<'EOF'
-auth       sufficient     pam_opendirectory.so
-EOF
-
-	run env MOLE_PAM_SUDO_FILE="$pam_file" "$PROJECT_ROOT/bin/touchid.sh" enable --dry-run
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"DRY RUN MODE"* ]] || return 1
-
-	run grep "pam_tid.so" "$pam_file"
-	[ "$status" -ne 0 ]
-}
-
-@test "enable_touchid sets correct file permissions on pam file" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow"
-	fi
-	pam_file="$HOME/pam_perms_enable"
-	cat >"$pam_file" <<'EOF'
-auth       sufficient     pam_opendirectory.so
-EOF
-
-	fake_bin="$HOME/fake-bin-perms-enable"
-	create_fake_utils "$fake_bin"
-
-	run env PATH="$fake_bin:$PATH" MOLE_PAM_SUDO_FILE="$pam_file" "$PROJECT_ROOT/bin/touchid.sh" enable
-	[ "$status" -eq 0 ]
-	grep -q "pam_tid.so" "$pam_file"
-
-	local perms
-	perms=$(stat -f "%Lp" "$pam_file" 2>/dev/null || stat -c "%a" "$pam_file" 2>/dev/null)
-	[ "$perms" = "444" ]
-}
-
-@test "disable_touchid sets correct file permissions on pam file" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow"
-	fi
-	pam_file="$HOME/pam_perms_disable"
-	cat >"$pam_file" <<'EOF'
-auth       sufficient     pam_tid.so
-auth       sufficient     pam_opendirectory.so
-EOF
-
-	fake_bin="$HOME/fake-bin-perms-disable"
-	create_fake_utils "$fake_bin"
-
-	run env PATH="$fake_bin:$PATH" MOLE_PAM_SUDO_FILE="$pam_file" "$PROJECT_ROOT/bin/touchid.sh" disable
-	[ "$status" -eq 0 ]
-
-	local perms
-	perms=$(stat -f "%Lp" "$pam_file" 2>/dev/null || stat -c "%a" "$pam_file" 2>/dev/null)
-	[ "$perms" = "444" ]
-}
-
-@test "enable_touchid sets correct permissions on sudo_local file" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow"
-	fi
-	pam_file="$HOME/pam_perms_sudolocal"
-	pam_local="$(dirname "$pam_file")/sudo_local_perms"
-	cat >"$pam_file" <<'EOF'
-# sudo: auth account password session
-auth       include        sudo_local
-auth       sufficient     pam_opendirectory.so
-EOF
-
-	fake_bin="$HOME/fake-bin-perms-sudolocal"
-	create_fake_utils "$fake_bin"
-
-	run env PATH="$fake_bin:$PATH" \
-		MOLE_PAM_SUDO_FILE="$pam_file" \
-		MOLE_PAM_SUDO_LOCAL_FILE="$pam_local" \
-		"$PROJECT_ROOT/bin/touchid.sh" enable
-	[ "$status" -eq 0 ]
-	grep -q "pam_tid.so" "$pam_local"
-
-	local perms
-	perms=$(stat -f "%Lp" "$pam_local" 2>/dev/null || stat -c "%a" "$pam_local" 2>/dev/null)
-	[ "$perms" = "444" ]
 }
 
 # --- JSON output mode tests ---

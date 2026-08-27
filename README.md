@@ -26,9 +26,7 @@ This fork ports the Mole CLI to **Linux**:
   contract (`distro_id`, `distro_pkg_manager`, plan functions); unknown
   distros fall back to a safe generic module. See
   [docs/linux-platform.md](docs/linux-platform.md).
-- **macOS retained** — the original macOS behavior still exists behind the
-  platform gate (`$MOLE_PLATFORM == darwin`), so the upstream codebase stays
-  mergeable.
+- **Linux-only hard fork** — broken from upstream. No macOS or Windows support; the Windows experiment and macOS gates have been removed. This is a dedicated Linux tool.
 - **CLI only** — no GUI. See the roadmap below.
 
 ## Features
@@ -56,7 +54,7 @@ Mapped to real commands in this fork:
 - `mo history`, `mo completion`, `mo update`, `mo remove` — operation log,
   shell completion, self-update, self-removal.
 
-The macOS-only `mo touchid` command is not part of the Linux CLI.
+The macOS-only `mo touchid` command does not exist in this fork — it has been removed entirely.
 
 ## Install
 
@@ -191,5 +189,5 @@ full contract, shipped-module coverage, and the testing guide.
 - Fork deltas: Linux platform layer (`lib/platform/`), distro capability
   contract, Linux delete semantics (`gio trash`, GNU stat), XDG path layout,
   Linux packaging (`packaging/arch/PKGBUILD`), Linux CI, and this fork's
-  install/self-update endpoints (`zigai/Mole`). The Go module path is left
-  identical to upstream so merges from upstream stay cheap.
+  install/self-update endpoints (`zigai/Mole`). This is a hard fork — it does
+  not track upstream.

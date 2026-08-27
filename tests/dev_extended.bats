@@ -1749,59 +1749,6 @@ EOF
     [[ "$output" != *"Library/Caches/JetBrains"* ]]
 }
 
-@test "clean_developer_tools includes JetBrains logs but not JetBrains cache sweep" {
-    # The Homebrew downloads sweep in this flow is gated to darwin in lib.
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow"
-    fi
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/dev.sh"
-stop_section_spinner() { :; }
-note_activity() { :; }
-safe_clean() { printf '%s|%s\n' "$1" "$2"; }
-clean_tool_cache() { :; }
-check_rust_toolchains() { :; }
-clean_dev_npm() { :; }
-clean_dev_python() { :; }
-clean_dev_go() { :; }
-clean_dev_mise() { :; }
-clean_dev_rust() { :; }
-clean_dev_docker() { :; }
-clean_dev_cloud() { :; }
-clean_dev_nix() { :; }
-clean_dev_shell() { :; }
-clean_dev_frontend() { :; }
-clean_project_caches() { :; }
-clean_dev_mobile() { :; }
-clean_dev_jvm() { :; }
-clean_dev_jetbrains_toolbox() { :; }
-clean_dev_ai_agents() { :; }
-clean_dev_other_langs() { :; }
-clean_dev_cicd() { :; }
-clean_dev_database() { :; }
-clean_dev_api_tools() { :; }
-clean_dev_network() { :; }
-clean_dev_misc() { :; }
-clean_dev_elixir() { :; }
-clean_dev_haskell() { :; }
-clean_dev_ocaml() { :; }
-clean_xcode_tools() { :; }
-clean_code_editors() { :; }
-clean_homebrew() { :; }
-clean_developer_tools
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"$HOME/Library/Logs/JetBrains/*|JetBrains IDE logs"* ]] || return 1
-    [[ "$output" != *"Library/Caches/JetBrains"* ]] || return 1
-    [[ "$output" == *"$HOME/Library/Caches/Homebrew/downloads/*|Homebrew cache"* ]] || return 1
-    [[ "$output" != *"$HOME/Library/Caches/Homebrew/*|Homebrew cache"* ]] || return 1
-    [[ "$output" != *"Library/Caches/Homebrew/api"* ]] || return 1
-    [[ "$output" != *"Library/Caches/Homebrew/bootsnap"* ]]
-}
-
 @test "clean_dev_misc protects Claude Code and OpenCode recovery state" {
     mkdir -p "$HOME/.claude/projects/project-a/memory"
     mkdir -p "$HOME/.claude/plugins/cache/plugin-a"

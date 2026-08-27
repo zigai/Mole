@@ -15,7 +15,6 @@ readonly MOLE_ERR_SIP_PROTECTED=10
 readonly MOLE_ERR_AUTH_FAILED=11
 readonly MOLE_ERR_READONLY_FS=12
 readonly MOLE_ERR_PROTECTED_PATH=13
-readonly MOLE_ERR_PRIVACY_DENIED=14
 readonly MOLE_ERR_MUTABLE_PARENT=15
 
 # Ensure dependencies are loaded
@@ -295,7 +294,7 @@ _mole_process_table() {
                 if (pid in mine) continue
                 n = split(comm[pid], parts, "/")
                 base = parts[n]
-                if (base == "du" || base == "find" || base == "mdfind" ||
+                if (base == "du" || base == "find" ||
                     base == "ps" || base == "grep" || base == "stat" ||
                     base == "ls" || base == "rm") continue
                 if (index(tolower(text[pid]), "com.tw93.mole") > 0) continue
@@ -619,32 +618,29 @@ _mole_is_critical_deletion_path() {
             ;;
     esac
 
-    # Linux critical denies (contract §4). Compiled only on linux so the
-    # darwin policy above stays byte-equivalent. /etc /usr /bin /sbin and
+    # Linux critical denies (contract §4). /etc /usr /bin /sbin and
     # /var/db are already refused by the shared arms above; these are the
     # remaining linux-only roots plus user secret stores. ~/.config denies
     # the directory itself only; app children stay deletable.
-    if [[ "${MOLE_PLATFORM}" == "linux" ]]; then
-        local linux_home="${HOME%/}"
-        case "$path" in
-            /boot | /boot/* | /efi | /efi/* | \
-                /proc | /proc/* | /sys | /sys/* | /dev | /dev/* | \
-                /run | /run/* | /srv | /srv/* | \
-                /lib | /lib/* | /lib64 | /lib64/* | \
-                /var/lib/pacman | /var/lib/pacman/* | /var/lib/rpm | /var/lib/rpm/*)
-                return 0
-                ;;
-            "$linux_home"/.ssh | "$linux_home"/.ssh/* | \
-                "$linux_home"/.gnupg | "$linux_home"/.gnupg/* | \
-                "$linux_home"/.password-store | "$linux_home"/.password-store/* | \
-                "$linux_home"/.pki | "$linux_home"/.pki/* | \
-                "$linux_home"/.kube | "$linux_home"/.kube/* | \
-                "$linux_home"/.aws | "$linux_home"/.aws/* | \
-                "$linux_home"/.config)
-                return 0
-                ;;
-        esac
-    fi
+    local linux_home="${HOME%/}"
+    case "$path" in
+        /boot | /boot/* | /efi | /efi/* | \
+            /proc | /proc/* | /sys | /sys/* | /dev | /dev/* | \
+            /run | /run/* | /srv | /srv/* | \
+            /lib | /lib/* | /lib64 | /lib64/* | \
+            /var/lib/pacman | /var/lib/pacman/* | /var/lib/rpm | /var/lib/rpm/*)
+            return 0
+            ;;
+        "$linux_home"/.ssh | "$linux_home"/.ssh/* | \
+            "$linux_home"/.gnupg | "$linux_home"/.gnupg/* | \
+            "$linux_home"/.password-store | "$linux_home"/.password-store/* | \
+            "$linux_home"/.pki | "$linux_home"/.pki/* | \
+            "$linux_home"/.kube | "$linux_home"/.kube/* | \
+            "$linux_home"/.aws | "$linux_home"/.aws/* | \
+            "$linux_home"/.config)
+            return 0
+            ;;
+    esac
 
     # Reject a user home root (/Users/<name>) while keeping its children
     # deletable. A single case glob cannot express "exactly one component
@@ -832,18 +828,6 @@ validate_path_for_deletion() {
         fi
     fi
 
-    # Endpoint-security/EDR agent caches under var/folders look like ordinary
-    # rebuildable caches, but deleting anything in a sensor's container trips
-    # tamper detection (reported as malware). Reject here, before the
-    # /private/var/folders allowlist below, so every deletion caller is covered,
-    # not only the cleanup sweeps that pre-check the predicate.
-    if declare -f is_endpoint_security_cache_path > /dev/null 2>&1 && is_endpoint_security_cache_path "$policy_path"; then
-        if [[ "${MO_DEBUG:-0}" == "1" ]]; then
-            log_warning "Path validation: endpoint-security agent cache skipped: $policy_path"
-        fi
-        return 1
-    fi
-
     # Allow known safe paths under /private
     case "$policy_path" in
         /private/tmp/* | \
@@ -957,9 +941,8 @@ safe_remove() {
     elif ! validate_path_for_deletion "$path"; then
         return 1
     fi
-
     # Honor the user whitelist here, not just in safe_clean. safe_remove is
-    # called directly by several clean/optimize flows (Xcode DerivedData,
+    # called directly by several clean/optimize flows (JetBrains caches,
     # mail downloads, deep-system caches, broken LaunchAgents) that would
     # otherwise ignore a user's whitelist selection. is_path_whitelisted is
     # a no-op when the whitelist is empty, and uninstall does not route
@@ -972,15 +955,6 @@ safe_remove() {
     # Check if path exists
     if [[ ! -e "$path" ]]; then
         return 0
-    fi
-
-    # Keep preview eligibility identical to real cleanup. This first check
-    # rejects an already-present compiled model cache before the dry-run return;
-    # the final-sink check below still catches one created during size probing.
-    if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$path" 2> /dev/null; then
-        debug_log "Skipped removal for compiled model cache: $path"
-        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "compiled model cache"
-        return 1
     fi
 
     # Live reverse-DNS caches under ~/Library/Caches (#1390): refuse while the
@@ -1080,18 +1054,6 @@ safe_remove() {
         fi
     fi
 
-    # Recheck at the final sink. A daemon can create this compiled-model cache
-    # while the preceding size probe walks the target, and deleting its parent
-    # then breaks recognition until the owning process restarts.
-    if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$path" 2> /dev/null; then
-        debug_log "Skipped removal after compiled model cache appeared: $path"
-        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "compiled model cache"
-        return 1
-    fi
-
-    # Recheck live-owner / open-SQLite state after size probing: a helper can
-    # launch while du is walking the tree (same race class as the compiled
-    # model cache check above).
     if _mole_should_refuse_live_user_cache_path "$path"; then
         debug_log "Skipped removal after live user cache appeared: $path"
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "live user cache"
@@ -1179,9 +1141,8 @@ safe_remove() {
             MOLE_PERMISSION_DENIED_COUNT=${MOLE_PERMISSION_DENIED_COUNT:-0}
             MOLE_PERMISSION_DENIED_COUNT=$((MOLE_PERMISSION_DENIED_COUNT + 1))
             export MOLE_PERMISSION_DENIED_COUNT
-            debug_log "Permission denied: $path, may need Full Disk Access"
+            debug_log "Permission denied: $path, may need elevated permissions"
             log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "permission denied"
-        else
             [[ "$silent" != "true" ]] && log_error "Failed to remove: $path"
             log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "error"
         fi
@@ -1288,7 +1249,7 @@ _mole_privileged_path_has_mutable_ancestor() {
         local owner_uid=""
         local mode=""
         owner_uid=$($STAT_BSD "${_MOLE_STAT_UID_FLAG}" "$probe" 2> /dev/null || true)
-        mode=$($STAT_BSD -f%Lp "$probe" 2> /dev/null || true)
+        mode=$("$STAT_BSD" "${_MOLE_STAT_MODE_FLAG}" "$probe" 2> /dev/null || true)
         if [[ ! "$owner_uid" =~ ^[0-9]+$ || ! "$mode" =~ ^[0-7]+$ ]]; then
             return 0
         fi
@@ -1364,14 +1325,6 @@ safe_sudo_remove() {
         debug_log "Skipped sudo remove for whitelisted path: $path"
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "whitelist"
         return 1
-    fi
-
-    # This policy must run before dry-run/test-mode returns so preview and real
-    # privileged cleanup agree on the eligible target set.
-    if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$path" 2> /dev/null; then
-        debug_log "Skipped sudo removal for compiled model cache: $path"
-        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "compiled model cache"
-        return "$MOLE_ERR_PROTECTED_PATH"
     fi
 
     if _mole_privileged_path_has_mutable_ancestor "$path"; then
@@ -1531,14 +1484,6 @@ safe_sudo_remove() {
         fi
     fi
 
-    # Keep the same last-mile policy as safe_remove: privileged cleanup must
-    # also fail closed if a compiled-model cache appears during size probing.
-    if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$path" 2> /dev/null; then
-        debug_log "Skipped sudo removal after compiled model cache appeared: $path"
-        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "compiled model cache"
-        return "$MOLE_ERR_PROTECTED_PATH"
-    fi
-
     local output
     local ret=0
     if [[ -n "$expected_parent" ]] && ! _mole_path_matches_identity \
@@ -1610,19 +1555,19 @@ safe_sudo_remove() {
 # Unified deletion helper (Trash + permanent routing with forensic log)
 # ============================================================================
 
-# Route a deletion through either macOS Trash or permanent rm, while logging
-# every call for forensic review. Designed for destructive paths where undo
-# matters (e.g. uninstall). Not used by cache-clean paths.
+# Route a deletion through either the freedesktop Trash (gio) or permanent rm,
+# while logging every call for forensic review. Designed for destructive paths
+# where undo matters (e.g. uninstall). Not used by cache-clean paths.
 #
 # Usage: mole_delete <path> [needs_sudo=false] [expected_dev_inode_mtime]
 #
 # Environment:
 #   MOLE_DELETE_MODE      "permanent" (default) or "trash"; other values fail
 #   MOLE_DRY_RUN=1        Log intent, do not delete
-#   MOLE_TEST_TRASH_DIR   Test-only override; Trash moves go here via `mv`
-#                         instead of Finder/trash CLI. Required for bats.
+#   MOLE_TEST_TRASH_DIR   Test-only override; gio stub moves go here via `mv`.
+#                         Required for bats.
 #   MOLE_DELETE_LOG       Override the log file path (default:
-#                         ~/Library/Logs/mole/deletions.log)
+#                         ${XDG_STATE_HOME:-~/.local/state}/mole/deletions.log)
 #
 # Returns 0 on success and a nonzero MOLE_ERR_* code on failure. Always appends a tab-separated line to
 # the deletions log: <iso_ts>\t<mode>\t<size_kb>\t<status>\t<path>.
@@ -1687,11 +1632,10 @@ mole_delete() {
     fi
 
     if [[ "$needs_sudo" == "true" ]] && _mole_privileged_path_has_mutable_ancestor "$path"; then
-        # Neither sudo rm/mv nor Finder authorization is safe here: both receive
-        # a pathname that a non-root invoking user can replace after validation.
-        # Finder also fails for some package-installed apps even after its native
-        # authorization dialog (#1266). Keep both Trash and permanent modes
-        # fail-closed and direct the user to perform the app move themselves.
+        # Elevated deletion is not safe here: it receives a pathname that a
+        # non-root invoking user can replace after validation (#1266). Keep
+        # both Trash and permanent modes fail-closed and direct the user to
+        # perform the app move themselves.
         _mole_delete_log "$mode" "unknown" "mutable-parent" "$path"
         debug_log "Refusing privileged delete below mutable parent: $path"
         return "$MOLE_ERR_MUTABLE_PARENT"
@@ -1784,11 +1728,10 @@ mole_delete() {
         fi
     fi
 
-    # Trash mode is a recoverable-delete contract. On linux the move goes
-    # through `gio trash`; when gio is missing or the move fails, fall back
-    # to permanent deletion with a single notice line (contract §6). On
-    # darwin, an unavailable Trash fails closed instead.
-    if [[ "$mode" == "trash" && "${MOLE_PLATFORM}" == "linux" ]]; then
+    # Trash mode is a recoverable-delete contract (contract §6): the move
+    # goes through `gio trash`; when gio is missing or the move fails, fall
+    # back to permanent deletion with a single notice line.
+    if [[ "$mode" == "trash" ]]; then
         local linux_trash_rc=0
         _mole_linux_gio_trash "$path" || linux_trash_rc=$?
         if [[ $linux_trash_rc -eq 0 ]]; then
@@ -1811,50 +1754,8 @@ mole_delete() {
         _mole_delete_log "trash" "$size_kb" "trash-unavailable-permanent-fallback" "$path"
         # Fall through to the permanent sink below so validation, sudo
         # handling, and operation logging stay on one shared path.
-    elif [[ "$mode" == "trash" ]]; then
-        local trash_rc=0
-        _mole_move_to_trash "$path" "$needs_sudo" \
-            "$expected_parent" "$expected_parent_id" \
-            "$expected_target_id" || trash_rc=$?
-        if [[ $trash_rc -eq 0 ]]; then
-            _mole_delete_log "trash" "$size_kb" "ok" "$path"
-            log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "TRASHED" "$path" "${size_kb}KB"
-            return 0
-        fi
-        if [[ $trash_rc -eq $MOLE_ERR_PRIVACY_DENIED ]]; then
-            _mole_delete_log "trash" "$size_kb" "privacy-denied" "$path"
-            log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$path" "privacy permission denied"
-            if [[ -z "${_MOLE_PRIVACY_DENIED_WARNED:-}" ]]; then
-                _MOLE_PRIVACY_DENIED_WARNED=1
-                export _MOLE_PRIVACY_DENIED_WARNED
-                printf 'Error: macOS could not authorize Trash access. Review App Management, App Data, or Full Disk Access for your terminal in System Settings, then retry.\n' >&2
-            fi
-            debug_log "macOS privacy permission denied while moving to Trash: $path"
-            return "$MOLE_ERR_PRIVACY_DENIED"
-        fi
-        if [[ $trash_rc -eq $MOLE_ERR_MUTABLE_PARENT ]]; then
-            _mole_delete_log "trash" "$size_kb" "mutable-parent" "$path"
-            log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$path" "mutable-parent"
-            debug_log "Trash move stopped because a mutable parent was detected: $path"
-            return "$MOLE_ERR_MUTABLE_PARENT"
-        fi
-        if [[ $trash_rc -eq 124 || $trash_rc -ge 128 ]]; then
-            local trash_status="interrupted"
-            [[ $trash_rc -eq 124 ]] && trash_status="timed-out"
-            _mole_delete_log "trash" "$size_kb" "$trash_status" "$path"
-            return "$trash_rc"
-        fi
-        _mole_delete_log "trash" "$size_kb" "trash-failed" "$path"
-        log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$path" "trash-failed"
-        if [[ -z "${_MOLE_TRASH_UNAVAILABLE_WARNED:-}" ]]; then
-            _MOLE_TRASH_UNAVAILABLE_WARNED=1
-            export _MOLE_TRASH_UNAVAILABLE_WARNED
-            printf 'Error: Trash unavailable; refusing permanent delete. Use --permanent to delete immediately.\n' >&2
-        fi
-        debug_log "Trash move failed, refusing permanent delete: $path"
-        return 1
-    fi
 
+    fi
     # Permanent path. Delegate to the existing safe_* helpers so path
     # validation, sudo handling, and existing log_operation calls remain
     # unchanged for callers that have always gone through rm -rf.
@@ -1891,475 +1792,6 @@ mole_delete() {
     _mole_delete_log "$mode" "$size_kb" "$status_label" "$path"
     return "$rc"
 }
-
-_mole_valid_invoking_home() {
-    local user_home=""
-    if declare -f get_invoking_home > /dev/null 2>&1; then
-        user_home=$(get_invoking_home)
-    else
-        user_home="${MOLE_USER_HOME:-${HOME:-}}"
-    fi
-
-    if [[ -z "$user_home" || "$user_home" != /* || "$user_home" == "/" || "$user_home" == "/var/root" ]]; then
-        debug_log "Refusing direct Trash move: invalid invoking user home: ${user_home:-<empty>}"
-        return 1
-    fi
-
-    printf '%s\n' "${user_home%/}"
-}
-
-_mole_path_is_immediate_child_of() {
-    local path="${1%/}"
-    local parent="${2%/}"
-    [[ "$path" == "$parent/"* ]] || return 1
-
-    local child="${path#"$parent"/}"
-    [[ -n "$child" && "$child" != */* ]]
-}
-
-_mole_path_is_application_bundle() {
-    local path="${1%/}"
-    _mole_path_is_immediate_child_of "$path" "/Applications" &&
-        [[ "${path##*/}" == *.app ]]
-}
-
-# Finder and third-party Trash helpers can fail on app bundles and TCC-managed
-# app data even after authentication. Route only these exact one-level targets
-# through the direct, recoverable Trash mover.
-_mole_path_requires_direct_trash() {
-    local path="${1%/}"
-    if _mole_path_is_application_bundle "$path"; then
-        return 0
-    fi
-
-    local user_home
-    user_home=$(_mole_valid_invoking_home) || return 1
-    _mole_path_is_immediate_child_of "$path" "$user_home/Library/Containers" && return 0
-    _mole_path_is_immediate_child_of "$path" "$user_home/Library/Group Containers" && return 0
-    _mole_path_is_immediate_child_of "$path" "$user_home/Library/Application Scripts" && return 0
-    return 1
-}
-
-# Finder's Trash API can move package-installed app bundles that macOS App
-# Management blocks from a direct mv. Run it only as the invoking user and only
-# for an exact one-level /Applications/*.app target selected above.
-_mole_move_app_to_trash_via_finder() {
-    local path="$1"
-    local expected_parent="${2:-}"
-    local expected_parent_id="${3:-}"
-    local expected_target_id="${4:-}"
-    local finder_rc=0
-
-    _mole_path_is_application_bundle "$path" || return 1
-    _mole_bound_path_matches "$path" "$expected_parent" \
-        "$expected_parent_id" "$expected_target_id" || return 1
-
-    run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" osascript - "$path" > /dev/null 2>&1 << 'APPLESCRIPT' || finder_rc=$?
-on run argv
-    set p to POSIX file (item 1 of argv)
-    tell application "Finder"
-        delete p
-    end tell
-end run
-APPLESCRIPT
-
-    if [[ $finder_rc -eq 124 || $finder_rc -ge 128 ]]; then
-        return "$finder_rc"
-    elif [[ $finder_rc -ne 0 ]] || [[ -e "$path" || -L "$path" ]]; then
-        debug_log "Finder failed to move application to Trash: $path"
-        return 1
-    fi
-
-    debug_log "Finder moved application to Trash: $path"
-    return 0
-}
-
-# Move a path to the macOS Trash. Test harnesses set MOLE_TEST_TRASH_DIR to
-# redirect the move to a tmpdir, avoiding any Finder/osascript interaction.
-_mole_move_to_trash() {
-    local path="$1"
-    local needs_sudo="${2:-false}"
-    local expected_parent="${3:-}"
-    local expected_parent_id="${4:-}"
-    local expected_target_id="${5:-}"
-
-    if [[ -n "${MOLE_TEST_TRASH_DIR:-}" ]]; then
-        mkdir -p "$MOLE_TEST_TRASH_DIR" 2> /dev/null || return 1
-        local dest="$MOLE_TEST_TRASH_DIR/$(basename "$path").$$.$(date +%s 2> /dev/null || echo 0)"
-        _mole_bound_path_matches "$path" "$expected_parent" \
-            "$expected_parent_id" "$expected_target_id" || return 1
-        mv "$path" "$dest" 2> /dev/null
-        return $?
-    fi
-
-    # Blocked in test mode so uninstall tests never hit Finder/AppleScript.
-    if [[ "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
-        return 1
-    fi
-
-    if [[ "$needs_sudo" == "true" ]]; then
-        _mole_move_path_to_user_trash "$path" "$needs_sudo" \
-            "$expected_parent" "$expected_parent_id" "$expected_target_id"
-        return $?
-    fi
-
-    if _mole_path_requires_direct_trash "$path"; then
-        local direct_rc=0
-        _mole_move_path_to_user_trash "$path" false \
-            "$expected_parent" "$expected_parent_id" \
-            "$expected_target_id" || direct_rc=$?
-        if [[ $direct_rc -eq $MOLE_ERR_PRIVACY_DENIED ]] &&
-            _mole_path_is_application_bundle "$path"; then
-            debug_log "Direct Trash move was denied; retrying application through Finder: $path"
-            local finder_rc=0
-            _mole_move_app_to_trash_via_finder "$path" \
-                "$expected_parent" "$expected_parent_id" \
-                "$expected_target_id" || finder_rc=$?
-            [[ $finder_rc -eq 0 ]] && return 0
-            [[ $finder_rc -eq 124 || $finder_rc -ge 128 ]] && return "$finder_rc"
-        fi
-        return "$direct_rc"
-    fi
-
-    # Prefer the `trash` CLI (Homebrew formula) for normal user-owned paths.
-    if command -v trash > /dev/null 2>&1; then
-        local trash_rc=0
-        _mole_bound_path_matches "$path" "$expected_parent" \
-            "$expected_parent_id" "$expected_target_id" || return 1
-        run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
-            trash "$path" > /dev/null 2>&1 || trash_rc=$?
-        [[ $trash_rc -eq 0 ]] && return 0
-        [[ $trash_rc -eq 124 || $trash_rc -ge 128 ]] && return "$trash_rc"
-    fi
-
-    # AppleScript fallback. Pass the path via argv so special chars (quotes,
-    # backslashes) cannot break out of the quoted string.
-    _mole_bound_path_matches "$path" "$expected_parent" \
-        "$expected_parent_id" "$expected_target_id" || return 1
-    run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
-        osascript - "$path" > /dev/null 2>&1 << 'APPLESCRIPT'
-on run argv
-    set p to POSIX file (item 1 of argv)
-    tell application "Finder"
-        delete p
-    end tell
-end run
-APPLESCRIPT
-}
-
-# /Library/Caches is mode 0777 on supported macOS releases, so it cannot anchor a
-# privileged path operation. This prepares an exact root-owned parent under
-# immutable /Library; mode 0711 lets the invoking user traverse into only the
-# randomized staging directory handed to them later.
-#
-# Takes the root as an argument so the concurrency behaviour is reachable from a
-# test without a real /Library write.
-_mole_prepare_privileged_trash_stage_root() {
-    local stage_root="$1"
-
-    # Refuse an existing symlink before any ownership or mode operation. Only
-    # root can mutate /Library, but a stale privileged symlink must not make
-    # chown/chmod follow into an unrelated tree. Then mkdir -p rather than
-    # test-then-mkdir: two concurrent Mole processes can both see a missing root,
-    # and the loser of a plain mkdir would abort a Trash move that was safe.
-    # Tolerating EEXIST costs nothing, because the verification below is what
-    # actually decides whether this root can anchor the operation.
-    if [[ -L "$stage_root" ]]; then
-        return 1
-    fi
-    sudo -n /bin/mkdir -p "$stage_root" 2> /dev/null || return 1
-    sudo -n /usr/sbin/chown 0:0 "$stage_root" 2> /dev/null || return 1
-    sudo -n /bin/chmod -N "$stage_root" 2> /dev/null || return 1
-    sudo -n /bin/chmod 711 "$stage_root" 2> /dev/null || return 1
-
-    local root_uid=""
-    local root_mode=""
-    root_uid=$($STAT_BSD "${_MOLE_STAT_UID_FLAG}" "$stage_root" 2> /dev/null || true)
-    root_mode=$($STAT_BSD -f%Lp "$stage_root" 2> /dev/null || true)
-    if [[ -L "$stage_root" || "$root_uid" != "0" || "$root_mode" != "711" ]]; then
-        return 1
-    fi
-}
-
-_mole_create_privileged_trash_stage() {
-    local stage_root="/Library/MoleTrashStaging"
-    local stage_dir=""
-
-    _mole_prepare_privileged_trash_stage_root "$stage_root" || return 1
-
-    stage_dir=$(sudo -n /usr/bin/mktemp -d "$stage_root/item.XXXXXX" 2> /dev/null) || return 1
-    if [[ "$stage_dir" != "$stage_root"/item.* || ! -d "$stage_dir" || -L "$stage_dir" ]]; then
-        return 1
-    fi
-    if _mole_privileged_path_has_mutable_ancestor "$stage_dir/item"; then
-        sudo -n /bin/rm -rf "$stage_dir" 2> /dev/null || true # SAFE: exact empty staging directory created by mktemp above
-        return 1
-    fi
-    printf '%s\n' "$stage_dir"
-}
-
-# The staging root is deliberately persistent. Removing it when it looked empty
-# raced with a concurrent Mole process that had just validated it and was about
-# to mktemp inside, turning a safe Trash move into a spurious failure.
-#
-# `mo remove` deliberately leaves it behind too. It is an empty root-owned
-# directory, and removing it would add a privileged step to an uninstall that
-# may need no privileges at all: a ~/.local-only install would meet a sudo
-# prompt for nothing. Any non-empty state is a payload a failed Trash move
-# preserved for the user, which uninstall must not touch either.
-
-_mole_move_path_to_user_trash() {
-    local path="$1"
-    local needs_sudo="${2:-false}"
-    local expected_parent="${3:-}"
-    local expected_parent_id="${4:-}"
-    local expected_target_id="${5:-}"
-
-    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
-        return 1
-    fi
-
-    local user_home
-    user_home=$(_mole_valid_invoking_home) || return 1
-
-    if [[ -z "$path" ]] || [[ ! -e "$path" && ! -L "$path" ]]; then
-        debug_log "Refusing direct Trash move: path does not exist: ${path:-<empty>}"
-        return 1
-    fi
-
-    if [[ "$needs_sudo" == "true" ]] && _mole_privileged_path_has_mutable_ancestor "$path"; then
-        debug_log "Refusing direct privileged Trash move below mutable parent: $path"
-        return "$MOLE_ERR_MUTABLE_PARENT"
-    fi
-
-    local trash_dir="${user_home%/}/.Trash"
-    local owner_uid="" owner_gid=""
-    if declare -f get_invoking_uid > /dev/null 2>&1; then
-        owner_uid=$(get_invoking_uid)
-    fi
-    if declare -f get_invoking_gid > /dev/null 2>&1; then
-        owner_gid=$(get_invoking_gid)
-    fi
-    if [[ ! "$owner_uid" =~ ^[0-9]+$ || ! "$owner_gid" =~ ^[0-9]+$ ]]; then
-        debug_log "Failed to resolve invoking user ownership for Trash"
-        return 1
-    fi
-
-    # The destination must be the invoking user's Trash, even though sudo is
-    # needed to unlink the original protected path.
-    if [[ -L "$trash_dir" ]]; then
-        debug_log "Refusing direct Trash move: invoking user Trash is a symlink: $trash_dir"
-        return 1
-    fi
-    if [[ ${EUID:-0} -eq 0 ]]; then
-        sudo -n -u "#$owner_uid" mkdir -p "$trash_dir" 2> /dev/null || {
-            debug_log "Failed to create invoking user Trash: $trash_dir"
-            return 1
-        }
-    elif ! mkdir -p "$trash_dir" 2> /dev/null; then
-        debug_log "Failed to create invoking user Trash: $trash_dir"
-        return 1
-    fi
-    if [[ ! -d "$trash_dir" || -L "$trash_dir" ]]; then
-        debug_log "Refusing direct Trash move: invoking user Trash is not a normal directory: $trash_dir"
-        return 1
-    fi
-
-    local trash_owner_uid=""
-    trash_owner_uid=$($STAT_BSD "${_MOLE_STAT_UID_FLAG}" "$trash_dir" 2> /dev/null || true)
-    if [[ "$trash_owner_uid" != "$owner_uid" ]]; then
-        debug_log "Refusing direct Trash move: invoking user does not own Trash: $trash_dir"
-        return 1
-    fi
-    if [[ ${EUID:-0} -eq 0 ]]; then
-        if ! sudo -n -u "#$owner_uid" chmod 700 "$trash_dir" 2> /dev/null; then
-            debug_log "Failed to set invoking user Trash permissions: $trash_dir"
-            return 1
-        fi
-    elif ! chmod 700 "$trash_dir" 2> /dev/null; then
-        debug_log "Failed to set invoking user Trash permissions: $trash_dir"
-        return 1
-    fi
-
-    # Avoid Finder-style ':' path weirdness and keep generated names filesystem-safe.
-    local base
-    base=$(basename "$path")
-    base="${base//:/__}"
-    base="${base//\//__}"
-    [[ -n "$base" && "$base" != "." && "$base" != ".." ]] || base="mole-trash-item"
-
-    local dest="$trash_dir/$base"
-    local ts suffix
-    ts=$(date +%s 2> /dev/null || echo 0)
-    suffix=0
-
-    while [[ -e "$dest" || -L "$dest" ]]; do
-        suffix=$((suffix + 1))
-        if [[ $suffix -gt 100 ]]; then
-            debug_log "Failed to choose unique Trash destination for: $path"
-            return 1
-        fi
-        dest="$trash_dir/$base.$ts.$$.$suffix"
-    done
-
-    if [[ -n "$expected_parent" ]]; then
-        if ! _mole_path_matches_identity \
-            "$path" "$expected_parent" "$expected_parent_id" "$expected_target_id"; then
-            debug_log "Refusing Trash move after selected path identity changed: $path"
-            return 1
-        fi
-    elif [[ -n "${_MOLE_TRASH_MOVE_EXPECTED_PATH:-}" && "$_MOLE_TRASH_MOVE_EXPECTED_PATH" == "$path" ]]; then
-        if ! _mole_path_matches_identity \
-            "$path" \
-            "$_MOLE_TRASH_MOVE_EXPECTED_PARENT" \
-            "$_MOLE_TRASH_MOVE_EXPECTED_PARENT_ID" \
-            "$_MOLE_TRASH_MOVE_EXPECTED_TARGET_ID"; then
-            debug_log "Refusing Trash move after source path identity changed: $path"
-            return 1
-        fi
-    fi
-
-    local move_output=""
-    local move_rc=0
-    if [[ "$needs_sudo" == "true" ]]; then
-        # Never point a root mv directly into ~/.Trash: that directory is
-        # intentionally controlled by the invoking user and can be replaced
-        # after validation. First cross the privileged boundary into a
-        # root-owned staging directory, then perform the final Trash move with
-        # only the invoking user's authority.
-        local stage_dir=""
-        local stage_path=""
-        stage_dir=$(_mole_create_privileged_trash_stage) || {
-            debug_log "Failed to create immutable Trash staging directory"
-            return 1
-        }
-        stage_path="$stage_dir/item"
-
-        # The first move must be a same-filesystem rename. A cross-volume mv
-        # degrades into copy-then-delete and can leave the only payload split
-        # between source and staging if it fails midway.
-        local source_device=""
-        local stage_device=""
-        local device_rc=0
-        source_device=$($STAT_BSD -f%d "$path" 2> /dev/null) || device_rc=$?
-        [[ $device_rc -eq 124 || $device_rc -ge 128 ]] && return "$device_rc"
-        if [[ $device_rc -eq 0 ]]; then
-            stage_device=$($STAT_BSD -f%d "$stage_dir" 2> /dev/null) || device_rc=$?
-        fi
-        [[ $device_rc -eq 124 || $device_rc -ge 128 ]] && return "$device_rc"
-        if [[ ! "$source_device" =~ ^[0-9]+$ || "$source_device" != "$stage_device" ]]; then
-            sudo -n /bin/rm -rf "$stage_dir" 2> /dev/null || true # SAFE: exact empty staging directory created by mktemp above
-            debug_log "Refusing cross-volume privileged Trash staging: $path"
-            return 1
-        fi
-
-        local stage_move_rc=0
-        _mole_bound_path_matches "$path" "$expected_parent" \
-            "$expected_parent_id" "$expected_target_id" || return 1
-        sudo -n /bin/mv "$path" "$stage_path" 2> /dev/null || stage_move_rc=$?
-        if [[ $stage_move_rc -ne 0 ]]; then
-            if [[ $stage_move_rc -eq 124 || $stage_move_rc -ge 128 ]]; then
-                if [[ -e "$stage_path" || -L "$stage_path" ]]; then
-                    log_error "Trash move interrupted; item preserved for recovery at: $stage_path"
-                fi
-                return "$stage_move_rc"
-            fi
-            sudo -n /bin/rm -rf "$stage_dir" 2> /dev/null || true # SAFE: exact root-owned directory created by mktemp above
-            debug_log "Failed to move path into immutable Trash staging: $path"
-            return 1
-        fi
-        # Keep the stage root-owned while ownership is repaired. `-h` keeps chown
-        # off symlink targets, and `-x` keeps it from descending into a nested
-        # mount: the same-device gate above only compares the payload root with
-        # the stage, so a disk image or FUSE volume mounted *inside* the payload
-        # is still reachable, and chown -R would rewrite ownership on that
-        # filesystem and can block on it. Once either payload ownership or stage
-        # ownership changes, preserve on any later failure rather than
-        # reintroducing user-owned content into the privileged source path.
-        local handoff_rc=0
-        sudo -n /bin/chmod 700 "$stage_dir" 2> /dev/null || handoff_rc=$?
-        if [[ $handoff_rc -eq 0 ]]; then
-            sudo -n /usr/sbin/chown -Rhx "$owner_uid:$owner_gid" \
-                "$stage_path" 2> /dev/null || handoff_rc=$?
-        fi
-        if [[ $handoff_rc -eq 0 ]]; then
-            sudo -n /usr/sbin/chown "$owner_uid:$owner_gid" \
-                "$stage_dir" 2> /dev/null || handoff_rc=$?
-        fi
-        if [[ $handoff_rc -ne 0 ]]; then
-            if [[ $handoff_rc -eq 124 || $handoff_rc -ge 128 ]]; then
-                log_error "Trash move interrupted; item preserved for recovery at: $stage_path"
-                return "$handoff_rc"
-            fi
-            log_error "Trash move failed; item preserved for recovery at: $stage_path"
-            debug_log "Failed to hand Trash staging directory to invoking user"
-            return 1
-        fi
-
-        if [[ ${EUID:-0} -eq 0 ]]; then
-            move_output=$(sudo -n -u "#$owner_uid" /bin/mv -n "$stage_path" "$dest" 2>&1) || move_rc=$?
-        else
-            move_output=$(/bin/mv -n "$stage_path" "$dest" 2>&1) || move_rc=$?
-        fi
-
-        if [[ $move_rc -ne 0 || -e "$stage_path" || -L "$stage_path" ]]; then
-            if [[ $move_rc -eq 124 || $move_rc -ge 128 ]]; then
-                if [[ -e "$stage_path" || -L "$stage_path" ]]; then
-                    log_error "Trash move interrupted; item preserved for recovery at: $stage_path"
-                elif [[ -e "$dest" || -L "$dest" ]]; then
-                    debug_log "Trash move completed before interruption was observed: $dest"
-                fi
-                return "$move_rc"
-            fi
-            move_rc=1
-            # stage_dir is user-controlled after the ownership handoff above.
-            # Never let root resolve stage_path again: it may have been replaced
-            # between the failed user move and this branch. Preserve the item
-            # in staging and report the exact recovery location instead.
-            log_error "Trash move failed; item preserved for recovery at: $stage_path"
-        else
-            # The invoking user owns stage_dir but has no write bit on the
-            # root-owned 0711 parent, so only a privileged rmdir can unlink it.
-            sudo -n /bin/rmdir "$stage_dir" 2> /dev/null || true
-        fi
-    else
-        _mole_bound_path_matches "$path" "$expected_parent" \
-            "$expected_parent_id" "$expected_target_id" || return 1
-        move_output=$(mv -n "$path" "$dest" 2>&1) || move_rc=$?
-    fi
-    if [[ $move_rc -ne 0 ]]; then
-        [[ $move_rc -eq 124 || $move_rc -ge 128 ]] && return "$move_rc"
-        debug_log "Failed to move path directly to invoking user Trash: $path -> $dest: $move_output"
-        case "$move_output" in
-            *"Operation not permitted"* | *"operation not permitted"* | \
-                *"Permission denied"* | *"permission denied"*)
-                return "$MOLE_ERR_PRIVACY_DENIED"
-                ;;
-        esac
-        return 1
-    fi
-    if [[ -e "$path" || -L "$path" ]] || [[ ! -e "$dest" && ! -L "$dest" ]]; then
-        debug_log "Failed to move path directly without overwriting destination: $path -> $dest"
-        return 1
-    fi
-
-    debug_log "Moved path directly to invoking user Trash: $path -> $dest"
-    return 0
-}
-
-# Batched Trash move for non-sudo, non-symlink paths. Removes the per-file
-# Finder/AppleScript fan-out that made uninstalls feel frozen. The caller binds
-# each item to its original physical parent and inode through the snapshot
-# arrays below; this helper rechecks that identity before every direct move.
-_MOLE_TRASH_BATCH_SNAPSHOT_PATHS=()
-_MOLE_TRASH_BATCH_SNAPSHOT_PARENTS=()
-_MOLE_TRASH_BATCH_SNAPSHOT_PARENT_IDS=()
-_MOLE_TRASH_BATCH_SNAPSHOT_TARGET_IDS=()
-_MOLE_TRASH_BATCH_MOVED_PATHS=()
-_MOLE_TRASH_MOVE_EXPECTED_PATH=""
-_MOLE_TRASH_MOVE_EXPECTED_PARENT=""
-_MOLE_TRASH_MOVE_EXPECTED_PARENT_ID=""
-_MOLE_TRASH_MOVE_EXPECTED_TARGET_ID=""
 
 _MOLE_PATH_SNAPSHOT_PARENT=""
 _MOLE_PATH_SNAPSHOT_PARENT_ID=""
@@ -2410,91 +1842,6 @@ _mole_bound_path_matches() {
         "$path" "$expected_parent" "$expected_parent_id" "$expected_target_id"
 }
 
-_mole_move_to_trash_batch() {
-    local -a paths=("$@")
-    [[ ${#paths[@]} -eq 0 ]] && return 0
-    _MOLE_TRASH_BATCH_MOVED_PATHS=()
-
-    local use_bound_snapshots=false
-    if [[ ${#_MOLE_TRASH_BATCH_SNAPSHOT_PATHS[@]} -eq ${#paths[@]} &&
-        ${#_MOLE_TRASH_BATCH_SNAPSHOT_PARENTS[@]} -eq ${#paths[@]} &&
-        ${#_MOLE_TRASH_BATCH_SNAPSHOT_PARENT_IDS[@]} -eq ${#paths[@]} &&
-        ${#_MOLE_TRASH_BATCH_SNAPSHOT_TARGET_IDS[@]} -eq ${#paths[@]} ]]; then
-        use_bound_snapshots=true
-    fi
-
-    local -a expected_parents=()
-    local -a expected_parent_ids=()
-    local -a expected_target_ids=()
-    local index p
-    for ((index = 0; index < ${#paths[@]}; index++)); do
-        p="${paths[$index]}"
-        if [[ "$use_bound_snapshots" == "true" ]]; then
-            [[ "${_MOLE_TRASH_BATCH_SNAPSHOT_PATHS[$index]}" == "$p" ]] || return 1
-            expected_parents+=("${_MOLE_TRASH_BATCH_SNAPSHOT_PARENTS[$index]}")
-            expected_parent_ids+=("${_MOLE_TRASH_BATCH_SNAPSHOT_PARENT_IDS[$index]}")
-            expected_target_ids+=("${_MOLE_TRASH_BATCH_SNAPSHOT_TARGET_IDS[$index]}")
-        else
-            _mole_snapshot_path_identity "$p" || return 1
-            expected_parents+=("$_MOLE_PATH_SNAPSHOT_PARENT")
-            expected_parent_ids+=("$_MOLE_PATH_SNAPSHOT_PARENT_ID")
-            expected_target_ids+=("$_MOLE_PATH_SNAPSHOT_TARGET_ID")
-        fi
-    done
-
-    if [[ -n "${MOLE_TEST_TRASH_DIR:-}" ]]; then
-        mkdir -p "$MOLE_TEST_TRASH_DIR" 2> /dev/null || return 1
-        local ts
-        ts=$(date +%s 2> /dev/null || echo 0)
-        local dest
-        for ((index = 0; index < ${#paths[@]}; index++)); do
-            p="${paths[$index]}"
-            _mole_path_matches_identity \
-                "$p" \
-                "${expected_parents[$index]}" \
-                "${expected_parent_ids[$index]}" \
-                "${expected_target_ids[$index]}" || return 1
-            dest="$MOLE_TEST_TRASH_DIR/$(basename "$p").$$.${ts}.$RANDOM"
-            /bin/mv "$p" "$dest" 2> /dev/null || return 1
-            _MOLE_TRASH_BATCH_MOVED_PATHS+=("$p")
-        done
-        return 0
-    fi
-
-    if [[ "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
-        return 1
-    fi
-
-    # Avoid handing a stale lexical batch to a third-party Trash CLI or Finder.
-    # Direct per-item renames keep the helper in one shell process and let us
-    # recheck the bound parent/inode immediately before every move.
-    local failed=0
-    for ((index = 0; index < ${#paths[@]}; index++)); do
-        p="${paths[$index]}"
-        if ! _mole_path_matches_identity \
-            "$p" \
-            "${expected_parents[$index]}" \
-            "${expected_parent_ids[$index]}" \
-            "${expected_target_ids[$index]}"; then
-            failed=1
-            continue
-        fi
-        _MOLE_TRASH_MOVE_EXPECTED_PATH="$p"
-        _MOLE_TRASH_MOVE_EXPECTED_PARENT="${expected_parents[$index]}"
-        _MOLE_TRASH_MOVE_EXPECTED_PARENT_ID="${expected_parent_ids[$index]}"
-        _MOLE_TRASH_MOVE_EXPECTED_TARGET_ID="${expected_target_ids[$index]}"
-        if _mole_move_path_to_user_trash "$p" false; then
-            _MOLE_TRASH_BATCH_MOVED_PATHS+=("$p")
-        else
-            failed=1
-        fi
-        _MOLE_TRASH_MOVE_EXPECTED_PATH=""
-        _MOLE_TRASH_MOVE_EXPECTED_PARENT=""
-        _MOLE_TRASH_MOVE_EXPECTED_PARENT_ID=""
-        _MOLE_TRASH_MOVE_EXPECTED_TARGET_ID=""
-    done
-    [[ $failed -eq 0 ]]
-}
 
 _mole_delete_log() {
     local mode="$1"
@@ -2502,11 +1849,9 @@ _mole_delete_log() {
     local status="$3"
     local target="$4"
 
-    local default_delete_log="$HOME/Library/Logs/mole/deletions.log"
+    local default_delete_log="${XDG_STATE_HOME:-$HOME/.local/state}/mole/deletions.log"
     if command -v mole_state_dir > /dev/null 2>&1; then
         default_delete_log="$(mole_state_dir)/deletions.log"
-    elif [[ "$(uname -s)" == "Linux" ]]; then
-        default_delete_log="${XDG_STATE_HOME:-$HOME/.local/state}/mole/deletions.log"
     fi
     local log_file="${MOLE_DELETE_LOG:-$default_delete_log}"
     local log_dir
@@ -2707,13 +2052,13 @@ safe_sudo_find_delete() {
         "$deadline_seconds" > /dev/null || return $?
 
     # Keep the entire sudo-probing body independent of the caller's errexit
-    # state. macOS 14's /bin/bash build fires the caller's errexit when a
-    # sudo shell-function mock returns nonzero inside an if condition (the
-    # same bash 3.2.57 on macOS 15+ does not), so the guard must sit above
-    # the first sudo probe, not just around the scan/batch loop. The
-    # predicates below intentionally return 1 for ordinary "not protected /
-    # not whitelisted / no oplog" cases; callers still get explicit nonzero
-    # returns from the validation gates, restored to their errexit state.
+    # state: some bash builds fire the caller's errexit when a sudo
+    # shell-function mock returns nonzero inside an if condition, so the
+    # guard must sit above the first sudo probe, not just around the
+    # scan/batch loop. The predicates below intentionally return 1 for
+    # ordinary "not protected / not whitelisted / no oplog" cases; callers
+    # still get explicit nonzero returns from the validation gates, restored
+    # to their errexit state.
     local restore_errexit=0
     case $- in
         *e*)
@@ -2855,8 +2200,8 @@ safe_sudo_find_delete() {
     #
     # Regular files are removed in one privileged xargs batch instead of one
     # safe_sudo_remove per match: the single-file path costs three sudo forks
-    # per file (test -e, du, rm), which turns a sweep over a stale .logarchive
-    # bundle (1000+ tracev3 files) into minutes. Every path still passes the
+    # per file (test -e, du, rm), which turns a sweep over a stale log
+    # directory (1000+ rotated files) into minutes. Every path still passes the
     # same per-file gates before entering the batch; only the rm is batched.
     # Directories and dry-run keep the single-file path so rm -rf handling
     # and preview output stay unchanged.
@@ -3108,27 +2453,6 @@ get_path_size_kb() {
     [[ $timeout_budget -gt 0 ]] || timeout_budget=1
     local size_deadline=$((SECONDS + timeout_budget))
 
-    # Uninstall totals represent estimated disk occupancy. Keep .app bundles
-    # on the same physical-size basis as the directory fallback; logical size
-    # can be much larger for APFS-cloned bundles and must not be mixed into the
-    # same total as `du` results (#1404).
-    if [[ "${MOLE_PLATFORM}" == "darwin" ]] && [[ "$path" == *.app || "$path" == *.app/ ]]; then
-        local mdls_size
-        local mdls_timeout=""
-        local mdls_deadline_rc=0
-        mdls_timeout=$(_mole_timeout_with_deadline \
-            "$size_timeout" "$size_deadline") || mdls_deadline_rc=$?
-        [[ $mdls_deadline_rc -eq 0 ]] || return "$mdls_deadline_rc"
-        local mdls_rc=0
-        mdls_size=$(run_with_timeout "$mdls_timeout" mdls \
-            -name kMDItemPhysicalSize -raw "$path" < /dev/null 2> /dev/null) || mdls_rc=$?
-        [[ $mdls_rc -eq 124 || $mdls_rc -ge 128 ]] && return "$mdls_rc"
-        if [[ "$mdls_size" =~ ^[0-9]+$ && "$mdls_size" -gt 0 ]]; then
-            echo $(((mdls_size + 1023) / 1024))
-            return
-        fi
-    fi
-
     # Fast path for regular files and symlinks: st_blocks is measured in
     # 512-byte units and matches the physical basis of `du -skP`.
     if [[ -f "$path" || -L "$path" ]]; then
@@ -3227,15 +2551,11 @@ diagnose_removal_failure() {
 
     case "$exit_code" in
         "$MOLE_ERR_SIP_PROTECTED")
-            reason="protected by macOS (SIP/MDM)"
+            reason="protected by system policy (read-only or immutable)"
             ;;
         "$MOLE_ERR_AUTH_FAILED")
             reason="authentication failed"
-            if declare -F check_touchid_support > /dev/null 2>&1 && check_touchid_support > /dev/null 2>&1; then
-                suggestion="Check your credentials or restart Terminal"
-            else
-                suggestion="Try 'mole touchid' to enable fingerprint auth"
-            fi
+            suggestion="Check your credentials or restart Terminal"
             ;;
         "$MOLE_ERR_READONLY_FS")
             reason="filesystem is read-only"
@@ -3244,21 +2564,13 @@ diagnose_removal_failure() {
         "$MOLE_ERR_PROTECTED_PATH")
             reason="protected by Mole safety rules"
             ;;
-        "$MOLE_ERR_PRIVACY_DENIED")
-            reason="macOS could not authorize Trash access"
-            suggestion="Review App Management, App Data, or Full Disk Access for your terminal in System Settings"
-            ;;
         "$MOLE_ERR_MUTABLE_PARENT")
             reason="Mole cannot safely use elevated deletion below a user-writable parent"
-            suggestion="Move the app to Trash in Finder; Mole will leave protected containers and app data untouched"
+            suggestion="Move the app to the Trash; Mole will leave protected containers and app data untouched"
             ;;
         *)
             reason="permission denied"
-            if declare -F check_touchid_support > /dev/null 2>&1 && check_touchid_support > /dev/null 2>&1; then
-                suggestion="Try running again or check file ownership"
-            else
-                suggestion="Try 'mole touchid' or check with 'ls -l'"
-            fi
+            suggestion="Try running again or check file ownership"
             ;;
     esac
 

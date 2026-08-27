@@ -34,14 +34,10 @@ setup() {
 	# Create standard scan directories
 	mkdir -p "$HOME/Downloads"
 	mkdir -p "$HOME/Desktop"
-	mkdir -p "$HOME/Documents"
-	mkdir -p "$HOME/Public"
-	mkdir -p "$HOME/Library/Downloads"
 
 	# Clear previous test files
 	rm -rf "${HOME:?}/Downloads"/*
 	rm -rf "${HOME:?}/Desktop"/*
-	rm -rf "${HOME:?}/Documents"/*
 }
 
 # Test arguments
@@ -66,37 +62,12 @@ setup() {
 # Tests using find (forced fallback by hiding fd)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@test "scan_installers_in_path (fallback find): finds .dmg files" {
-	# .dmg is a darwin-only installer artifact; the linux extension list
-	# (pkg.tar.zst/deb/rpm/AppImage/iso/tar.gz/tar.xz) never matches it.
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow"
-	fi
-	touch "$HOME/Downloads/Chrome.dmg"
-	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
-        export MOLE_TEST_MODE=1
-        source \"\$1\"
-        scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
-
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"Chrome.dmg"* ]]
-}
 
 @test "scan_installers_in_path (fallback find): finds multiple installer types" {
 	touch "$HOME/Downloads/App3.iso"
-	# Extension sets differ per platform: darwin hunts .dmg/.pkg/.mpkg,
-	# linux hunts .deb/.rpm/.AppImage. .iso is shared and pins the shared
-	# branch of the extension list on both.
-	if [[ "$(uname -s)" == "Darwin" ]]; then
-		touch "$HOME/Downloads/App1.dmg"
-		touch "$HOME/Downloads/App2.pkg"
-		touch "$HOME/Downloads/App.mpkg"
-	else
-		touch "$HOME/Downloads/App1.deb"
-		touch "$HOME/Downloads/App2.rpm"
-		touch "$HOME/Downloads/App.AppImage"
-	fi
+	touch "$HOME/Downloads/App1.deb"
+	touch "$HOME/Downloads/App2.rpm"
+	touch "$HOME/Downloads/App.AppImage"
 
 	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
@@ -105,15 +76,9 @@ setup() {
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
 	[ "$status" -eq 0 ]
-	if [[ "$(uname -s)" == "Darwin" ]]; then
-		[[ "$output" == *"App1.dmg"* ]] || return 1
-		[[ "$output" == *"App2.pkg"* ]] || return 1
-		[[ "$output" == *"App.mpkg"* ]] || return 1
-	else
-		[[ "$output" == *"App1.deb"* ]] || return 1
-		[[ "$output" == *"App2.rpm"* ]] || return 1
-		[[ "$output" == *"App.AppImage"* ]] || return 1
-	fi
+	[[ "$output" == *"App1.deb"* ]] || return 1
+	[[ "$output" == *"App2.rpm"* ]] || return 1
+	[[ "$output" == *"App.AppImage"* ]] || return 1
 	[[ "$output" == *"App3.iso"* ]]
 }
 
@@ -169,11 +134,6 @@ setup() {
 
 @test "scan_installers_in_path (fallback find): ignores non-installer files" {
 	touch "$HOME/Downloads/document.pdf"
-	# .tar.gz is an installer extension on linux, so only assert its
-	# rejection on darwin.
-	if [[ "$(uname -s)" == "Darwin" ]]; then
-		touch "$HOME/Downloads/archive.tar.gz"
-	fi
 	touch "$HOME/Downloads/Installer.iso"
 	touch "$HOME/Downloads/notes.txt"
 
@@ -187,9 +147,6 @@ setup() {
 	[[ "$output" != *"document.pdf"* ]] || return 1
 	[[ "$output" != *"image.jpg"* ]] || return 1
 	[[ "$output" != *"notes.txt"* ]] || return 1
-	if [[ "$(uname -s)" == "Darwin" ]]; then
-		[[ "$output" != *"archive.tar.gz"* ]] || return 1
-	fi
 	[[ "$output" == *"Installer.iso"* ]]
 }
 
@@ -197,10 +154,6 @@ setup() {
 	# Don't create all scan directories, some may not exist
 	# Only create Downloads, delete others if they exist
 	rm -rf "$HOME/Desktop"
-	rm -rf "$HOME/Documents"
-	rm -rf "$HOME/Public"
-	rm -rf "$HOME/Public/Downloads"
-	rm -rf "$HOME/Library/Downloads"
 	mkdir -p "$HOME/Downloads"
 
 	# Add an installer to the one directory that exists
@@ -302,10 +255,7 @@ setup() {
         printf "deleted=%s failed=%s freed=%s\n" "$total_deleted" "${total_delete_failed:-0}" "$total_size_freed_kb"
         [[ ! -e "$2" ]] || return 1
         [[ ! -e "$3" ]] || return 1
-        # The operations log lives under Library/Logs on darwin and under
-        # XDG_STATE_HOME on linux.
-        op_log="$HOME/Library/Logs/mole/operations.log"
-        [[ "$(uname -s)" == "Darwin" ]] || op_log="${XDG_STATE_HOME:-$HOME/.local/state}/mole/operations.log"
+        op_log="${XDG_STATE_HOME:-$HOME/.local/state}/mole/operations.log"
         grep -F "[installer] REMOVED $2" "$op_log" > /dev/null
     ' bash "$PROJECT_ROOT/bin/installer.sh" "$first" "$second"
 
@@ -323,10 +273,8 @@ setup() {
         export MOLE_TEST_NO_AUTH=1
         export MOLE_DELETE_LOG="$HOME/deletions.log"
         source "$1"
+        protected="/etc"
 
-        # /System only exists on darwin; /etc is the shared always-protected
-        # arm of the deletion policy.
-        if [[ "$(uname -s)" == "Darwin" ]]; then protected="/System"; else protected="/etc"; fi
         system_size=$(get_file_size "$protected")
         INSTALLER_PATHS=("$2" "$protected")
         INSTALLER_SIZES=(4 "$system_size")
@@ -345,17 +293,12 @@ setup() {
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"rc=3 deleted=1 failed=1"* ]] || return 1
-	# The failure line names whichever protected path was refused.
-	if [[ "$(uname -s)" == "Darwin" ]]; then
-		[[ "$output" == *"failure=/System (delete failed)"* ]]
-	else
-		[[ "$output" == *"failure=/etc (delete failed)"* ]]
-	fi
+	[[ "$output" == *"failure=/etc (delete failed)"* ]]
 }
 
 @test "execute_installer_delete_plan refuses replaced files" {
-	local target="$HOME/Downloads/Replaced.dmg"
-	local replacement="$HOME/Downloads/Replacement.dmg"
+	local target="$HOME/Downloads/Replaced.iso"
+	local replacement="$HOME/Downloads/Replacement.iso"
 	printf 'one' > "$target"
 	printf 'one' > "$replacement"
 
@@ -383,11 +326,11 @@ setup() {
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"rc=3 deleted=0 failed=1"* ]] || return 1
-	[[ "$output" == *"Replaced.dmg (changed since scan)"* ]]
+	[[ "$output" == *"Replaced.iso (changed since scan)"* ]]
 }
 
 @test "execute_installer_delete_plan refuses size drift" {
-	local target="$HOME/Downloads/Grew.dmg"
+	local target="$HOME/Downloads/Grew.iso"
 	printf 'one' > "$target"
 
 	# shellcheck disable=SC2016
@@ -412,7 +355,7 @@ setup() {
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"rc=3 deleted=0 failed=1"* ]] || return 1
-	[[ "$output" == *"Grew.dmg (changed since scan)"* ]]
+	[[ "$output" == *"Grew.iso (changed since scan)"* ]]
 }
 
 @test "show_summary reports installer delete failures" {
@@ -424,7 +367,7 @@ setup() {
         total_deleted=1
         total_size_freed_kb=1
         total_delete_failed=2
-        INSTALLER_DELETE_FAILURES=("$HOME/Downloads/Blocked.dmg (protected path)" "$HOME/Downloads/Stale.pkg (still exists)")
+        INSTALLER_DELETE_FAILURES=("$HOME/Downloads/Blocked.iso (protected path)" "$HOME/Downloads/Stale.rpm (still exists)")
 
         show_summary
     ' bash "$PROJECT_ROOT/bin/installer.sh"
@@ -432,15 +375,14 @@ setup() {
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Installer cleanup incomplete"* ]] || return 1
 	[[ "$output" == *"Failed to remove"* ]] || return 1
-	[[ "$output" == *"Blocked.dmg"* ]] || return 1
+	[[ "$output" == *"Blocked.iso"* ]] || return 1
 	[[ "$output" == *"protected path"* ]] || return 1
-	[[ "$output" == *"Stale.pkg"* ]] || return 1
+	[[ "$output" == *"Stale.rpm"* ]] || return 1
 	[[ "$output" == *"still exists"* ]] || return 1
-	[[ "$output" != *"Your Mac is cleaner now!"* ]]
 }
 
 @test "main exits nonzero after real incomplete installer cleanup" {
-	local removable="$HOME/Downloads/MainGood.dmg"
+	local removable="$HOME/Downloads/MainGood.iso"
 	printf 'good' > "$removable"
 
 	# shellcheck disable=SC2016
@@ -456,7 +398,7 @@ setup() {
             system_size=$(get_file_size "/System")
             INSTALLER_PATHS=("$test_removable" "/System")
             INSTALLER_SIZES=(4 "$system_size")
-            DISPLAY_NAMES=("MainGood.dmg" "System")
+            DISPLAY_NAMES=("MainGood.iso" "System")
             return 0
         }
 
@@ -479,7 +421,7 @@ setup() {
 }
 
 @test "main reports incomplete cleanup under errexit" {
-	local removable="$HOME/Downloads/ErrexitGood.dmg"
+	local removable="$HOME/Downloads/ErrexitGood.iso"
 	printf 'good' > "$removable"
 
 	# Production runs installer.sh with set -euo pipefail active, so main must
@@ -498,7 +440,7 @@ setup() {
             system_size=$(get_file_size "/System")
             INSTALLER_PATHS=("$test_removable" "/System")
             INSTALLER_SIZES=(4 "$system_size")
-            DISPLAY_NAMES=("ErrexitGood.dmg" "System")
+            DISPLAY_NAMES=("ErrexitGood.iso" "System")
             return 0
         }
 

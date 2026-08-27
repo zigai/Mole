@@ -4,46 +4,6 @@ set -euo pipefail
 
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/purge_shared.sh"
-# Preflight TCC prompts once to avoid mid-run interruptions.
-check_tcc_permissions() {
-    # macOS-only: TCC permission prompts do not exist on Linux.
-    [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]] || return 0
-    [[ -t 1 ]] || return 0
-    local permission_flag="$HOME/.cache/mole/permissions_granted"
-    [[ -f "$permission_flag" ]] && return 0
-    local -a tcc_dirs=(
-        "$HOME/Library/Caches"
-        "$HOME/Library/Logs"
-        "$HOME/Library/Application Support"
-        "$HOME/Library/Containers"
-        "$HOME/.cache"
-    )
-    # Quick permission probe (avoid deep scans).
-    local needs_permission_check=false
-    if ! ls "$HOME/Library/Caches" > /dev/null 2>&1; then
-        needs_permission_check=true
-    fi
-    if [[ "$needs_permission_check" == "true" ]]; then
-        echo ""
-        echo -e "${BLUE}First-time setup${NC}"
-        echo -e "${GRAY}macOS will request permissions to access Library folders.${NC}"
-        echo -e "${GRAY}You may see ${GREEN}${#tcc_dirs[@]} permission dialogs${NC}${GRAY}, please approve them all.${NC}"
-        echo ""
-        echo -ne "${PURPLE}${ICON_ARROW}${NC} Press ${GREEN}Enter${NC} to continue: "
-        read -r
-        MOLE_SPINNER_PREFIX="" start_inline_spinner "Requesting permissions..."
-        # Touch each directory to trigger prompts without deep scanning.
-        for dir in "${tcc_dirs[@]}"; do
-            [[ -d "$dir" ]] && command find "$dir" -maxdepth 1 -type d > /dev/null 2>&1
-        done
-        stop_inline_spinner
-        echo ""
-    fi
-    # Mark as granted to avoid repeat prompts.
-    ensure_user_file "$permission_flag"
-    return 0
-}
-# Args: $1=browser_name, $2=cache_path, $3=optional post-size guard callback
 # Clean Service Worker cache while protecting critical web editors.
 clean_service_worker_cache() {
     local browser_name="$1"

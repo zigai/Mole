@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Linux installer pattern matching on temp trees, plus darwin pattern parity.
+# Linux installer pattern matching on temp trees.
 
 setup_file() {
     PROJECT_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
@@ -63,31 +63,6 @@ EOF
     fi
     grep -qx 'NOMATCH app.dmg' <<< "$output"
     [[ "$output" == *"NOMATCH installer.pkg"* ]]
-}
-
-@test "darwin keeps its historical patterns byte-equivalent in effect" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=darwin \
-        FIXTURE_UNAME_S=Darwin PATH="${BATS_TEST_DIRNAME}/fixtures/linux/misc/bin:$PATH" \
-        MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/bin/installer.sh"
-for name in app.dmg installer.pkg setup.mpkg disk.iso image.xip pkg.deb Tool.AppImage; do
-    if handle_candidate_file "/dl/$name" | grep -q .; then
-        echo "MATCH $name"
-    else
-        echo "NOMATCH $name"
-    fi
-done
-echo "paths=${#INSTALLER_SCAN_PATHS[@]}"
-EOF
-
-    [ "$status" -eq 0 ]
-    for name in app.dmg installer.pkg setup.mpkg disk.iso image.xip; do
-        grep -qx "MATCH $name" <<< "$output"
-    done
-    [[ "$output" == *"NOMATCH pkg.deb"* ]]
-    [[ "$output" == *"NOMATCH Tool.AppImage"* ]]
-    [[ "$output" != *"paths=3"* ]] # darwin keeps the extended scan path list
 }
 
 @test "linux scanner finds linux installers under Downloads" {
@@ -162,16 +137,4 @@ EOF
     [[ "$output" == *"Report only: 2 installer packages"* ]]
     # The fixture cache must never appear as a deletable scan result.
     [[ "$output" != *"$HOME/pacman-fixture/foo-1.0-1-x86_64.pkg.tar.zst"* ]]
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=darwin \
-        FIXTURE_UNAME_S=Darwin PATH="${BATS_TEST_DIRNAME}/fixtures/linux/misc/bin:$PATH" \
-        MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<EOF
-set -euo pipefail
-source "\$PROJECT_ROOT/lib/core/common.sh"
-source "\$PROJECT_ROOT/bin/installer.sh"
-_installer_report_pacman_cache "\$HOME/pacman-fixture"
-exit 0
-EOF
-    [ "$status" -eq 0 ]
-    [[ "$output" != *"Report only"* ]]
 }

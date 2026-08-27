@@ -23,12 +23,8 @@ teardown_file() {
 	applied_count="${applied_count% optimizations}"
 	[[ "$output" != *"Would apply 23 optimizations"* ]] || return 1
 	[[ "$output" =~ [0-9]+\ unchanged ]] || return 1
-	if [[ "$(uname -s)" == "Darwin" ]]; then
-		[[ "$output" =~ [0-9]+\ skipped ]] || return 1
-	else
-		# Linux catalog reports missing distro capabilities as unavailable.
-		[[ "$output" =~ ([0-9]+\ unavailable|[0-9]+\ skipped) ]] || return 1
-	fi
+	# Linux catalog reports missing distro capabilities as unavailable.
+	[[ "$output" =~ ([0-9]+\ unavailable|[0-9]+\ skipped) ]] || return 1
 	[[ "$output" != *"System fully optimized"* ]] || return 1
 
 	run env HOME="$TEST_HOME" "$PROJECT_ROOT/mole" history --json
@@ -37,49 +33,6 @@ teardown_file() {
 	[[ "$output" == *"\"failed_tasks\": 0"* ]] || return 1
 }
 
-@test "optimize failure reaches terminal exit and history contracts" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow"
-	fi
-
-	local config_dir="$TEST_HOME/.config/mole"
-	local stub_dir="$TEST_HOME/bin"
-	mkdir -p "$config_dir" "$stub_dir"
-
-	run env PROJECT_ROOT="$PROJECT_ROOT" CONFIG_FILE="$config_dir/whitelist_optimize" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/optimize/catalog.sh"
-for action in "${MOLE_OPTIMIZE_ACTIONS[@]}"; do
-    [[ "$action" == "cache_refresh" ]] || printf '%s\n' "$action"
-done > "$CONFIG_FILE"
-EOF
-	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-
-	cat > "$stub_dir/qlmanage" <<'EOF'
-#!/bin/bash
-exit 9
-EOF
-	chmod +x "$stub_dir/qlmanage"
-
-	run env HOME="$TEST_HOME" MOLE_TEST_NO_AUTH=1 NO_COLOR=1 PATH="$stub_dir:$PATH" \
-		"$PROJECT_ROOT/mole" optimize
-	[[ "$status" -eq 1 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"1 failed"* ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Failed to rebuild 2 Finder cache service(s)"* ]] || return 1
-
-	run env HOME="$TEST_HOME" "$PROJECT_ROOT/mole" history --json
-	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	printf '%s\n' "$output" | python3 -c '
-import json
-import sys
-
-data = json.load(sys.stdin)
-session = data["sessions"][0]
-assert session["command"] == "optimize"
-assert session["items"] == 0
-assert session["failed_tasks"] == 1
-'
-}
 
 @test "optimize cleanup records startup and interrupt failures in history" {
 	run env HOME="$TEST_HOME/cleanup-history" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'

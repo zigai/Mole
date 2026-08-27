@@ -17,18 +17,12 @@ readonly MOLE_BASE_LOADED=1
 # once here rather than at each read site; entry points still assign over it.
 : "${DRY_RUN:=false}"
 
-# Resolve the execution platform before any policy tables assemble below.
-# lib/platform/platform.sh re-runs the authoritative detection when sourced;
-# filling the variable here only covers direct lib sourcing and keeps every
-# downstream switch reading one variable ($MOLE_PLATFORM).
-if [[ -z "${MOLE_PLATFORM:-}" ]]; then
-    case "$(uname -s 2> /dev/null || echo unknown)" in
-        Darwin) MOLE_PLATFORM="darwin" ;;
-        Linux) MOLE_PLATFORM="linux" ;;
-        *) MOLE_PLATFORM="unknown" ;;
-    esac
-    export MOLE_PLATFORM
-fi
+# This fork is Linux-only: the platform is the constant "linux". lib/platform/
+# platform.sh re-runs the authoritative detection when sourced and refuses
+# anything else; filling the variable here only covers direct lib sourcing so
+# downstream code reads one exported variable ($MOLE_PLATFORM).
+: "${MOLE_PLATFORM:=linux}"
+export MOLE_PLATFORM
 
 # ============================================================================
 # Color Definitions
@@ -60,7 +54,7 @@ fi
 
 # Probe several process patterns without collapsing pgrep errors into "not
 # running". Arguments are selector/pattern pairs, for example:
-#   mole_pgrep_any -x Xcode -f com.apple.dt.XCTest
+#   mole_pgrep_any -x code -f com.company.product.helper
 # Returns 0 when any pattern matches, 1 only when every probe reports no match,
 # and 2 when no pattern matches but at least one probe could not be completed.
 mole_pgrep_any() {
@@ -86,7 +80,6 @@ mole_pgrep_any() {
 
     return "$aggregate_rc"
 }
-
 # ============================================================================
 # Icon Definitions
 # ============================================================================
@@ -106,35 +99,6 @@ readonly ICON_NAV_UP="↑"
 readonly ICON_NAV_DOWN="↓"
 readonly ICON_INFO="ℹ"
 
-# ============================================================================
-# LaunchServices Utility
-# ============================================================================
-
-# Locate the lsregister binary (path varies across macOS versions).
-# MOLE_LSREGISTER_PATH overrides the lookup when it is set, including when it
-# is set empty, which disables every lsregister-backed scan. Tests use the
-# empty form to keep a multi-second LaunchServices dump out of assertions that
-# have nothing to do with launch services.
-get_lsregister_path() {
-    if [[ -n "${MOLE_LSREGISTER_PATH+x}" ]]; then
-        echo "$MOLE_LSREGISTER_PATH"
-        return 0
-    fi
-
-    local -a candidates=(
-        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-        "/System/Library/CoreServices/Frameworks/LaunchServices.framework/Support/lsregister"
-    )
-    local candidate=""
-    for candidate in "${candidates[@]}"; do
-        if [[ -x "$candidate" ]]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    echo ""
-    return 0
-}
 
 # ============================================================================
 # Global Configuration Constants
@@ -150,7 +114,6 @@ readonly MOLE_CRASH_REPORT_AGE_DAYS=7    # Crash report retention (days)
 readonly MOLE_SAVED_STATE_AGE_DAYS=30    # Saved state retention (days) - increased for safety
 readonly MOLE_GPU_CACHE_AGE_DAYS=1       # Rebuildable GPU cache retention (days)
 readonly MOLE_TM_BACKUP_SAFE_HOURS=48    # TM backup safety window (hours)
-readonly MOLE_MAX_DS_STORE_FILES=500     # Max .DS_Store files to clean per scan
 readonly MOLE_MAX_ORPHAN_ITERATIONS=100  # Max iterations for orphaned app data scan
 readonly MOLE_ONE_GIB_KB=$((1024 * 1024))
 readonly MOLE_ONE_GB_BYTES=1000000000
@@ -158,69 +121,26 @@ readonly MOLE_ONE_GB_BYTES=1000000000
 # ============================================================================
 # Whitelist Configuration
 # ============================================================================
-readonly FINDER_METADATA_SENTINEL="FINDER_METADATA"
 declare -a DEFAULT_WHITELIST_PATTERNS=()
 declare -a DEFAULT_OPTIMIZE_WHITELIST_PATTERNS=()
 declare -a SAFETY_WHITELIST_PATTERNS=()
 
-# Platform-conditional assembly (contract §4): the darwin sets keep their
-# pre-fork form verbatim; linux gets XDG-rooted equivalents instead of
-# macOS-only paths that can never match.
-if [[ "${MOLE_PLATFORM}" == "linux" ]]; then
-    # Convenience defaults (fully replaceable by a user whitelist file).
-    DEFAULT_WHITELIST_PATTERNS=(
-        "$HOME/.cache/ms-playwright*"
-        "$HOME/.gradle/caches/*"
-        "$HOME/.gradle/daemon/*"
-        "$HOME/.ollama/models/*"
-        "$HOME/.cache/JetBrains*"
-        "$HOME/.cache/tealdeer/tldr-pages"
-    )
-    # Hard safety, merged unconditionally: Mole's own cache/state roots must
-    # survive every sweep (contract §3), and the freedesktop Trash must stay
-    # intact so trash-routed deletions remain recoverable.
-    SAFETY_WHITELIST_PATTERNS=(
-        "${XDG_CACHE_HOME:-$HOME/.cache}/mole*"
-        "${XDG_STATE_HOME:-$HOME/.local/state}/mole*"
-    )
-else
-    declare -a DEFAULT_WHITELIST_PATTERNS=(
-        "$HOME/Library/Caches/ms-playwright*"
-        "$HOME/.gradle/caches/*"
-        "$HOME/.gradle/daemon/*"
-        "$HOME/.ollama/models/*"
-        "$HOME/Library/Caches/com.nssurge.surge-mac/*"
-        "$HOME/Library/Application Support/com.nssurge.surge-mac/*"
-        "$HOME/Library/Caches/org.R-project.R/R/renv/*"
-        "$HOME/Library/Caches/JetBrains*"
-        "$HOME/Library/Caches/com.jetbrains.toolbox*"
-        "$HOME/Library/Caches/tealdeer/tldr-pages"
-        "$HOME/Library/Application Support/JetBrains*"
-        "$HOME/Library/Caches/com.apple.finder"
-        "$HOME/Library/Mobile Documents*"
-        "$FINDER_METADATA_SENTINEL"
-    )
-
-    # Safety patterns always merge into an existing user whitelist file.
-    # Replacement semantics (V1.7.5+) treat the file as the complete set, so
-    # protections added later (FINDER_METADATA in V1.9.9) never reached users who
-    # already had a whitelist. Only hard safety belongs here; optional convenience
-    # defaults stay in DEFAULT_WHITELIST_PATTERNS and remain fully replaceable.
-    SAFETY_WHITELIST_PATTERNS=(
-        "$FINDER_METADATA_SENTINEL"
-        # `clean_user_essentials` sweeps every child of ~/Library/Caches, so a row
-        # that only lives in DEFAULT_WHITELIST_PATTERNS stops protecting these the
-        # moment a user saves one custom entry. Removing them breaks macOS search,
-        # font rendering and iCloud sync rather than costing a rebuild, and
-        # pypoetry/virtualenvs holds live interpreters every Poetry project points
-        # at, not cached downloads. Hard safety, so they merge unconditionally.
-        "$HOME/Library/Caches/com.apple.FontRegistry*"
-        "$HOME/Library/Caches/com.apple.spotlight*"
-        "$HOME/Library/Caches/com.apple.Spotlight*"
-        "$HOME/Library/Caches/CloudKit*"
-        "$HOME/Library/Caches/pypoetry/virtualenvs*"
-    )
-fi
+# Convenience defaults (fully replaceable by a user whitelist file).
+DEFAULT_WHITELIST_PATTERNS=(
+    "$HOME/.cache/ms-playwright*"
+    "$HOME/.gradle/caches/*"
+    "$HOME/.gradle/daemon/*"
+    "$HOME/.ollama/models/*"
+    "$HOME/.cache/JetBrains*"
+    "$HOME/.cache/tealdeer/tldr-pages"
+)
+# Hard safety, merged unconditionally: Mole's own cache/state roots must
+# survive every sweep (contract §3), and the freedesktop Trash must stay
+# intact so trash-routed deletions remain recoverable.
+SAFETY_WHITELIST_PATTERNS=(
+    "${XDG_CACHE_HOME:-$HOME/.cache}/mole*"
+    "${XDG_STATE_HOME:-$HOME/.local/state}/mole*"
+)
 
 # Resolve the cache root used by GitHub CLI without following filesystem
 # links. Both cleanup and whitelist inventory consume this value so a custom
@@ -232,32 +152,6 @@ mole_github_cli_cache_root() {
         [[ "${HOME:-}" == /* ]] || return 1
         cache_root="$HOME/.cache"
     fi
-
-    [[ "$cache_root" == /* && ! "$cache_root" =~ [[:cntrl:]] ]] || return 1
-    case "$cache_root" in
-        *'/../'* | */.. | *'/./'* | */. | *'//'*) return 1 ;;
-    esac
-
-    cache_root="${cache_root%/}"
-    local home_root="${HOME:-}"
-    home_root="${home_root%/}"
-    case "$cache_root" in
-        "" | / | "$home_root") return 1 ;;
-    esac
-
-    printf '%s\n' "$cache_root"
-}
-
-# Resolve the per-user cache root reported by macOS. Keep the resolver shared
-# so cleanup and whitelist inventory always describe the same path.
-mole_darwin_user_cache_root() {
-    declare -f run_with_timeout > /dev/null 2>&1 || return 1
-
-    local cache_root=""
-    local resolver_rc=0
-    cache_root=$(run_with_timeout "${MOLE_TIMEOUT_QUICK_DETECT_SEC:-3}" \
-        /usr/bin/getconf DARWIN_USER_CACHE_DIR 2> /dev/null) || resolver_rc=$?
-    [[ $resolver_rc -eq 0 ]] || return "$resolver_rc"
 
     [[ "$cache_root" == /* && ! "$cache_root" =~ [[:cntrl:]] ]] || return 1
     case "$cache_root" in
@@ -404,16 +298,14 @@ load_mole_whitelist() {
                 continue
             fi
 
-            if [[ "$line" != "$FINDER_METADATA_SENTINEL" ]]; then
-                if [[ "$line" =~ [[:cntrl:]] ]]; then
-                    WHITELIST_WARNINGS+=("Invalid path format: $line")
-                    continue
-                fi
+            if [[ "$line" =~ [[:cntrl:]] ]]; then
+                WHITELIST_WARNINGS+=("Invalid path format: $line")
+                continue
+            fi
 
-                if [[ "$line" != /* ]]; then
-                    WHITELIST_WARNINGS+=("Must be absolute path: $line")
-                    continue
-                fi
+            if [[ "$line" != /* ]]; then
+                WHITELIST_WARNINGS+=("Must be absolute path: $line")
+                continue
             fi
 
             if [[ "$line" =~ // ]]; then
@@ -428,29 +320,27 @@ load_mole_whitelist() {
                     ;;
             esac
 
-            # Linux critical denies (contract §4): never whitelisted, so
-            # every WHITELIST_PATTERNS consumer refuses these even when a
-            # user whitelist file asks for them explicitly. ~/.config denies
-            # the directory itself only; children stay whitelisable.
-            if [[ "${MOLE_PLATFORM}" == "linux" ]]; then
-                case "$line" in
-                    /boot | /boot/* | /efi | /efi/* | \
-                        /usr | /usr/* | /bin | /bin/* | /sbin | /sbin/* | \
-                        /lib | /lib/* | /lib64 | /lib64/* | /proc | /proc/* | \
-                        /sys | /sys/* | /dev | /dev/* | /run | /run/* | /srv | /srv/* | \
-                        /var/lib/pacman | /var/lib/pacman/* | /var/lib/rpm | /var/lib/rpm/* | \
-                        "$MOLE_USER_HOME"/.ssh | "$MOLE_USER_HOME"/.ssh/* | \
-                        "$MOLE_USER_HOME"/.gnupg | "$MOLE_USER_HOME"/.gnupg/* | \
-                        "$MOLE_USER_HOME"/.password-store | "$MOLE_USER_HOME"/.password-store/* | \
-                        "$MOLE_USER_HOME"/.pki | "$MOLE_USER_HOME"/.pki/* | \
-                        "$MOLE_USER_HOME"/.kube | "$MOLE_USER_HOME"/.kube/* | \
-                        "$MOLE_USER_HOME"/.aws | "$MOLE_USER_HOME"/.aws/* | \
-                        "$MOLE_USER_HOME"/.config)
-                        WHITELIST_WARNINGS+=("Protected system path: $line")
-                        continue
-                        ;;
-                esac
-            fi
+            # Critical denies (contract §4): never whitelisted, so every
+            # WHITELIST_PATTERNS consumer refuses these even when a user
+            # whitelist file asks for them explicitly. ~/.config denies the
+            # directory itself only; children stay whitelisable.
+            case "$line" in
+                /boot | /boot/* | /efi | /efi/* | \
+                    /usr | /usr/* | /bin | /bin/* | /sbin | /sbin/* | \
+                    /lib | /lib/* | /lib64 | /lib64/* | /proc | /proc/* | \
+                    /sys | /sys/* | /dev | /dev/* | /run | /run/* | /srv | /srv/* | \
+                    /var/lib/pacman | /var/lib/pacman/* | /var/lib/rpm | /var/lib/rpm/* | \
+                    "$MOLE_USER_HOME"/.ssh | "$MOLE_USER_HOME"/.ssh/* | \
+                    "$MOLE_USER_HOME"/.gnupg | "$MOLE_USER_HOME"/.gnupg/* | \
+                    "$MOLE_USER_HOME"/.password-store | "$MOLE_USER_HOME"/.password-store/* | \
+                    "$MOLE_USER_HOME"/.pki | "$MOLE_USER_HOME"/.pki/* | \
+                    "$MOLE_USER_HOME"/.kube | "$MOLE_USER_HOME"/.kube/* | \
+                    "$MOLE_USER_HOME"/.aws | "$MOLE_USER_HOME"/.aws/* | \
+                    "$MOLE_USER_HOME"/.config)
+                    WHITELIST_WARNINGS+=("Protected system path: $line")
+                    continue
+                    ;;
+            esac
 
             duplicate="false"
             if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
@@ -485,34 +375,20 @@ load_mole_whitelist() {
 }
 
 # ============================================================================
-# Stat Compatibility (BSD / GNU)
+# Stat Flags (GNU coreutils)
 # ============================================================================
 readonly STAT_BSD="/usr/bin/stat"
 
-# stat(1) format flags differ between the BSD and GNU implementations: BSD
-# takes `-f<fmt>`, GNU (Linux) takes `-c<fmt>` and renames fields (%z -> %s,
-# %m -> %Y, %Su -> %U). Resolved once from $MOLE_PLATFORM so every consumer
-# in base.sh and file_ops.sh reads one variable instead of repeating the
-# platform switch.
-if [[ "${MOLE_PLATFORM}" == "linux" ]]; then
-    _MOLE_STAT_SIZE_FLAG="-c%s"            # st_size in bytes
-    _MOLE_STAT_MTIME_FLAG="-c%Y"           # st_mtime epoch seconds
-    _MOLE_STAT_OWNER_FLAG="-c%U"           # owner user name
-    _MOLE_STAT_UID_FLAG="-c%u"
-    _MOLE_STAT_MODE_FLAG="-c%a"           # permission bits, octal             # owner uid
-    _MOLE_STAT_BLOCKS_FLAG="-c%b"          # st_blocks, 512-byte units
-    _MOLE_STAT_ID_MTIME_FLAG="-c%d:%i:%Y"  # dev:inode:mtime identity probe
-    _MOLE_STAT_ID_FLAG="-c%d:%i"           # dev:inode identity probe
-else
-    _MOLE_STAT_SIZE_FLAG="-f%z"
-    _MOLE_STAT_MTIME_FLAG="-f%m"
-    _MOLE_STAT_OWNER_FLAG="-f%Su"
-    _MOLE_STAT_UID_FLAG="-f%u"
-    _MOLE_STAT_MODE_FLAG="-f%Mp%Lp"
-    _MOLE_STAT_BLOCKS_FLAG="-f%b"
-    _MOLE_STAT_ID_MTIME_FLAG="-f%d:%i:%m"
-    _MOLE_STAT_ID_FLAG="-f%d:%i"
-fi
+# GNU stat(1) format flags, resolved once so every consumer in base.sh and
+# file_ops.sh reads one variable instead of repeating the format strings.
+_MOLE_STAT_SIZE_FLAG="-c%s"             # st_size in bytes
+_MOLE_STAT_MTIME_FLAG="-c%Y"            # st_mtime epoch seconds
+_MOLE_STAT_OWNER_FLAG="-c%U"            # owner user name
+_MOLE_STAT_UID_FLAG="-c%u"              # owner uid
+_MOLE_STAT_MODE_FLAG="-c%a"             # permission bits, octal
+_MOLE_STAT_BLOCKS_FLAG="-c%b"           # st_blocks, 512-byte units
+_MOLE_STAT_ID_MTIME_FLAG="-c%d:%i:%Y"   # dev:inode:mtime identity probe
+_MOLE_STAT_ID_FLAG="-c%d:%i"            # dev:inode identity probe
 
 # Get file size in bytes
 get_file_size() {
@@ -566,29 +442,22 @@ get_file_owner() {
 # System Utilities
 # ============================================================================
 
-# Detect CPU architecture
-# Returns: "Apple Silicon" or "Intel"
+# Returns: "ARM64" or "x86_64"
 detect_architecture() {
     if [[ -n "${MOLE_ARCH_CACHE:-}" ]]; then
         echo "$MOLE_ARCH_CACHE"
         return 0
     fi
 
-    if [[ "$(uname -m)" == "arm64" ]]; then
-        export MOLE_ARCH_CACHE="Apple Silicon"
-    else
-        export MOLE_ARCH_CACHE="Intel"
-    fi
+    case "$(uname -m)" in
+        arm64 | aarch64) export MOLE_ARCH_CACHE="ARM64" ;;
+        *) export MOLE_ARCH_CACHE="x86_64" ;;
+    esac
     echo "$MOLE_ARCH_CACHE"
 }
 
 get_free_space_target() {
-    local target="/"
-    if [[ -d "/System/Volumes/Data" ]]; then
-        target="/System/Volumes/Data"
-    fi
-
-    printf '%s\n' "$target"
+    printf '%s\n' "/"
 }
 
 # Get free disk space on root volume in 1K blocks.
@@ -632,7 +501,7 @@ get_free_space() {
 get_optimal_parallel_jobs() {
     local operation_type="${1:-default}"
     if [[ -z "${MOLE_CPU_CORES_CACHE:-}" ]]; then
-        export MOLE_CPU_CORES_CACHE=$(sysctl -n hw.ncpu 2> /dev/null || echo 4)
+        export MOLE_CPU_CORES_CACHE=$(nproc 2> /dev/null || echo 4)
     fi
     local cpu_cores="$MOLE_CPU_CORES_CACHE"
     case "$operation_type" in
@@ -696,11 +565,7 @@ get_user_home() {
         return 0
     fi
 
-    if command -v dscl > /dev/null 2>&1; then
-        home=$(dscl . -read "/Users/$user" NFSHomeDirectory 2> /dev/null | awk '{print $2}' | head -1 || true)
-    fi
-
-    if [[ -z "$home" && "${MOLE_PLATFORM:-}" == "linux" ]]; then
+    if [[ -z "$home" ]]; then
         home=$(getent passwd "$user" 2> /dev/null | cut -d: -f6 || true)
     fi
 
@@ -833,7 +698,7 @@ ensure_user_file() {
 # ============================================================================
 
 # Convert bytes to human-readable format (e.g., 1.5GB)
-# macOS (since Snow Leopard) uses Base-10 calculation (1 KB = 1000 bytes)
+# Uses Base-10 calculation (1 KB = 1000 bytes)
 bytes_to_human() {
     local bytes="$1"
     [[ "$bytes" =~ ^[0-9]+$ ]] || {
@@ -1193,12 +1058,12 @@ register_temp_dir() {
 }
 
 # Create temp file with prefix (for analyze.sh compatibility)
-# Compatible with both BSD mktemp (macOS default) and GNU mktemp (coreutils)
+# Compatible with GNU mktemp (coreutils)
 mktemp_file() {
     local prefix="${1:-mole}"
     local temp
     local error_msg
-    # Add .XXXXXX suffix to work with both BSD and GNU mktemp
+    # Add a .XXXXXX suffix so the template satisfies GNU mktemp
     if ! error_msg=$(mktemp "$(mole_temp_path_template "$prefix")" 2>&1); then
         echo "Error: Failed to create temporary file: $error_msg" >&2
         return 1
@@ -1514,9 +1379,8 @@ mole_clean_process_guard() {
 
 # Report a guard refusal. An unknown process state is the user's problem to see
 # now (it means Mole could not tell, not that it found something running), so it
-# prints against the item. A known-running app is ordinary and goes to the
 # end-of-run "Skipped while active" list instead of a line per cache.
-# Usage: mole_report_guard_stop "Xcode cache" mole_defer_cleanup_family "Xcode"
+# Usage: mole_report_guard_stop "JetBrains cache" mole_defer_cleanup_family "JetBrains"
 mole_report_guard_stop() {
     local display_name="$1"
     shift
@@ -1530,9 +1394,8 @@ mole_report_guard_stop() {
 
 # Does any of these targets survive the eligibility filter, i.e. would a real
 # cleanup have anything to do?
-#
 # Callers use it to decide whether an active app is worth reporting as skipped:
-# deferring "Xcode" when every candidate was already whitelisted tells the user
+# deferring "JetBrains" when every candidate was already whitelisted tells the user
 # to quit an app for no reason. The predicate list mirrors the one
 # `_safe_clean_impl` applies before it consults the delete guard, so the two
 # agree on what "eligible" means; broken symlinks are excluded there too.
@@ -1544,9 +1407,6 @@ mole_cleanup_targets_exist() {
             continue
         fi
         if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$target" 2> /dev/null; then
-            continue
-        fi
-        if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$target" 2> /dev/null; then
             continue
         fi
         return 0

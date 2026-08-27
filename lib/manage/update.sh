@@ -1,6 +1,6 @@
 #!/bin/bash
-# Mole self-update: version discovery (GitHub + Homebrew), install-channel
-# detection, the update-available banner cache, and the update flow itself.
+# Mole self-update: version discovery (GitHub), install-channel detection, the
+# update-available banner cache, and the update flow itself.
 # Extracted from the `mole` dispatcher, which now only routes.
 #
 # VERSION lives in `mole` (install.sh reads it from there); these functions
@@ -44,7 +44,6 @@ _update_host_is_arch_like() {
 }
 
 _update_print_linux_aur_hint() {
-    [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]] || return 0
     _update_host_is_arch_like || return 0
     printf '%s Tip: on Arch and derivatives you can keep mo current via an AUR package instead of the install script.\n' \
         "${ICON_INFO:-ℹ}"
@@ -141,16 +140,6 @@ _update_lock_path_has_unsafe_ancestor() {
             # group-writable prefixes, but keep world-writable paths closed.
             (((8#$mode & 0002) == 0)) || return 0
         fi
-        if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
-            # Darwin-only ACL enumeration: GNU ls has no -e, so on Linux the
-            # mode-bit checks above are the whole verdict at this level.
-            acl_listing=$(/bin/ls -lde "$probe" 2> /dev/null) || return 0
-            if printf '%s\n' "$acl_listing" |
-                /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:.*[[:space:]]allow[[:space:]]'; then
-                return 0
-            fi
-        fi
-        [[ "$probe" == "/" ]] && break
         local parent_probe="${probe%/*}"
         [[ "$parent_probe" != "$probe" ]] || return 0
         probe="$parent_probe"
@@ -175,22 +164,6 @@ _update_lock_prepare_dir() {
         fi
     fi
     [[ -d "$lock_dir" && ! -L "$lock_dir" ]] || return 1
-    # macOS preserves inherited ACLs across mkdir -m 0700. Clear them before
-    # opening the kernel lock and verify that no non-mode ACL entry remains.
-    # GNU chmod/ls have no -N/-e, and a Linux mkdir -m 0700 carries no
-    # inherited ACL entries to clear, so this sweep is darwin-only.
-    if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
-        if [[ "$use_sudo" == "true" ]]; then
-            _update_lock_sudo /bin/chmod -N "$lock_dir" 2> /dev/null || return 1
-            acl_listing=$(_update_lock_sudo /bin/ls -lde "$lock_dir" 2> /dev/null) || return 1
-        else
-            /bin/chmod -N "$lock_dir" 2> /dev/null || return 1
-            acl_listing=$(/bin/ls -lde "$lock_dir" 2> /dev/null) || return 1
-        fi
-        if printf '%s\n' "$acl_listing" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'; then
-            return 1
-        fi
-    fi
     if [[ "$use_sudo" == "true" ]]; then
         expected_uid=0
     fi
@@ -616,51 +589,6 @@ resolve_latest_stable_version() {
     done
 }
 
-run_brew_command() {
-    local timeout_seconds="$1"
-    shift
-
-    HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
-        run_with_timeout "$timeout_seconds" "$@"
-}
-
-run_brew_detect() {
-    run_brew_command "${MOLE_HOMEBREW_DETECT_TIMEOUT:-2}" "$@"
-}
-
-run_brew_query() {
-    run_brew_command "${MOLE_HOMEBREW_QUERY_TIMEOUT:-5}" "$@"
-}
-
-brew_mole_formula_installed() {
-    local brew_cmd="${1:-brew}"
-    run_brew_detect "$brew_cmd" list mole > /dev/null 2>&1
-}
-
-get_homebrew_latest_version() {
-    command -v brew > /dev/null 2>&1 || return 1
-
-    local line candidate=""
-
-    # Prefer local tap outdated info to avoid notifying before formula is available.
-    line=$(run_brew_query brew outdated --formula --verbose mole 2> /dev/null | head -1 || true)
-    if [[ "$line" == *"< "* ]]; then
-        candidate="${line##*< }"
-        candidate="${candidate%% *}"
-    fi
-
-    # Fallback for environments where outdated output is unavailable.
-    if [[ -z "$candidate" ]]; then
-        line=$(run_brew_query brew info mole 2> /dev/null | awk 'NR==1 { print; exit }' || true)
-        line="${line#==> }"
-        line="${line#*: }"
-        if [[ "$line" == stable* ]]; then
-            candidate=$(printf '%s\n' "$line" | awk '{print $2}')
-        fi
-    fi
-
-    [[ -n "$candidate" ]] && printf '%s\n' "$candidate"
-}
 resolve_mole_source_path() {
     # MOLE_ENTRY_SCRIPT is set by the `mole` entrypoint before this file is
     # sourced. Do NOT fall back to BASH_SOURCE[0] first: in here it names this
@@ -696,72 +624,6 @@ manual_install_repair_reason() {
     [[ -n "$reason" ]] && printf '%s\n' "$reason"
 }
 
-is_homebrew_mole_path() {
-    local mole_path="$1"
-    local has_brew="$2"
-    local link_target=""
-    [[ -n "$mole_path" ]] || return 1
-
-    if [[ -L "$mole_path" ]]; then
-        link_target=$(readlink "$mole_path" 2> /dev/null) || true
-        if [[ "$link_target" == *"Cellar/mole"* ]]; then
-            if $has_brew; then
-                brew_mole_formula_installed brew && return 0
-            fi
-            return 1
-        fi
-        return 1
-    fi
-
-    if [[ -f "$mole_path" ]]; then
-        # Paths are quoted so Homebrew bottle relocation cannot break parsing
-        # when the prefix contains spaces (e.g. Applite under "Application Support").
-        case "$mole_path" in
-            "/opt/homebrew/bin/mole" | "/usr/local/bin/mole")
-                if [[ -d "/opt/homebrew/Cellar/mole" ]] || [[ -d "/usr/local/Cellar/mole" ]]; then
-                    if $has_brew; then
-                        brew_mole_formula_installed brew && return 0
-                    else
-                        return 0 # Cellar exists, probably Homebrew install
-                    fi
-                fi
-                ;;
-        esac
-    fi
-
-    return 1
-}
-
-# Install detection (Homebrew vs manual).
-# Always follows the invoked Mole script, never PATH, so update and remove act
-# on the Mole the user actually ran instead of another copy earlier in PATH.
-is_homebrew_install() {
-    local has_brew=false
-    if command -v brew > /dev/null 2>&1; then
-        has_brew=true
-    fi
-
-    local mole_path
-    mole_path=$(resolve_mole_source_path || true)
-    is_homebrew_mole_path "$mole_path" "$has_brew"
-}
-
-get_install_channel() {
-    # Try user config dir first (matches install.sh behavior), fallback to SCRIPT_DIR
-    local channel_file="${MOLE_CONFIG_DIR:-$HOME/.config/mole}/install_channel"
-    if [[ ! -f "$channel_file" ]]; then
-        channel_file="$SCRIPT_DIR/install_channel"
-    fi
-    local channel="stable"
-    if [[ -f "$channel_file" ]]; then
-        channel=$(sed -n 's/^CHANNEL=\(.*\)$/\1/p' "$channel_file" | head -1)
-    fi
-    case "$channel" in
-        nightly | dev | stable) printf '%s\n' "$channel" ;;
-        *) printf 'stable\n' ;;
-    esac
-}
-
 # Read one field out of the install channel receipt, empty when absent.
 # User config dir first (matches install.sh), then the install directory.
 _read_install_channel_field() {
@@ -781,6 +643,17 @@ get_install_commit() {
 
 get_install_receipt() {
     _read_install_channel_field INSTALL_RECEIPT
+}
+
+# Stable vs nightly detection: read the channel recorded in the install
+# receipt written by install.sh. Script-install is the only channel left.
+get_install_channel() {
+    local channel
+    channel=$(_read_install_channel_field CHANNEL)
+    case "$channel" in
+        nightly | dev) printf '%s\n' "$channel" ;;
+        *) printf 'stable\n' ;;
+    esac
 }
 
 get_latest_commit_from_github() {
@@ -909,20 +782,8 @@ check_for_updates() {
                 fi
 
                 if [[ -n "$latest" && "$VERSION" != "$latest" && "$(printf '%s\n' "$VERSION" "$latest" | sort -V | head -1)" == "$VERSION" ]]; then
-                    # Homebrew is a darwin-only channel; linux script installs
-                    # always follow the fork's releases directly.
-                    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]] && is_homebrew_install; then
-                        # For Homebrew, only notify if the brew tap has the new version available locally
-                        local brew_latest
-                        brew_latest=$(get_homebrew_latest_version || true)
-                        if [[ -n "$brew_latest" && "$brew_latest" != "$VERSION" && "$(printf '%s\n' "$VERSION" "$brew_latest" | sort -V | head -1)" == "$VERSION" ]]; then
-                            printf "\nUpdate %s available, run %smo update%s\n\n" "$brew_latest" "$GREEN" "$NC" > "$msg_cache"
-                        else
-                            echo -n > "$msg_cache"
-                        fi
-                    else
-                        printf "\nUpdate %s available, run %smo update%s\n\n" "$latest" "$GREEN" "$NC" > "$msg_cache"
-                    fi
+                    # Script installs always follow the fork's releases directly.
+                    printf "\nUpdate %s available, run %smo update%s\n\n" "$latest" "$GREEN" "$NC" > "$msg_cache"
                 else
                     echo -n > "$msg_cache"
                 fi
@@ -943,20 +804,12 @@ ${GREEN}|_|  |_|\___/|_|\___|${NC}  ${GREEN}${MOLE_TAGLINE}${NC}
 EOF
 }
 show_version() {
-    local os_ver
-    if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
-        # Keep the linux report free of mac-only probes (sw_vers, csrutil).
-        os_ver=""
-        local os_release="${MOLE_OS_RELEASE_FILE:-/etc/os-release}"
-        if [[ -r "$os_release" ]]; then
-            os_ver=$(sed -n 's/^PRETTY_NAME=//p' "$os_release" 2> /dev/null | head -1 | tr -d '"')
-        fi
-        [[ -n "$os_ver" ]] || os_ver="$(uname -s) $(uname -r)"
-    elif command -v sw_vers > /dev/null; then
-        os_ver=$(sw_vers -productVersion)
-    else
-        os_ver="Unknown"
+    local os_ver=""
+    local os_release="${MOLE_OS_RELEASE_FILE:-/etc/os-release}"
+    if [[ -r "$os_release" ]]; then
+        os_ver=$(sed -n 's/^PRETTY_NAME=//p' "$os_release" 2> /dev/null | head -1 | tr -d '"')
     fi
+    [[ -n "$os_ver" ]] || os_ver="$(uname -s) $(uname -r)"
 
     local arch
     arch=$(uname -m)
@@ -964,23 +817,8 @@ show_version() {
     local kernel
     kernel=$(uname -r)
 
-    local sip_status=""
-    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]]; then
-        if command -v csrutil > /dev/null; then
-            sip_status=$(csrutil status 2> /dev/null | grep -o "enabled\|disabled" || echo "Unknown")
-            sip_status="$(LC_ALL=C tr '[:lower:]' '[:upper:]' <<< "${sip_status:0:1}")${sip_status:1}"
-        else
-            sip_status="Unknown"
-        fi
-    fi
-
     local disk_free
     disk_free=$(get_free_space)
-
-    local install_method="Manual"
-    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]] && is_homebrew_install; then
-        install_method="Homebrew"
-    fi
 
     local channel
     channel=$(get_install_channel)
@@ -999,16 +837,11 @@ show_version() {
             printf 'Channel: Nightly\n' 2> /dev/null || return 0
         fi
     fi
-    local os_label="macOS"
-    [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]] && os_label="OS"
-    printf '%s: %s\n' "$os_label" "$os_ver" 2> /dev/null || return 0
+    printf 'OS: %s\n' "$os_ver" 2> /dev/null || return 0
     printf 'Architecture: %s\n' "$arch" 2> /dev/null || return 0
     printf 'Kernel: %s\n' "$kernel" 2> /dev/null || return 0
-    if [[ -n "$sip_status" ]]; then
-        printf 'SIP: %s\n' "$sip_status" 2> /dev/null || return 0
-    fi
     printf 'Disk Free: %s\n' "$disk_free" 2> /dev/null || return 0
-    printf 'Install: %s\n' "$install_method" 2> /dev/null || return 0
+    printf 'Install: Manual\n' 2> /dev/null || return 0
     printf 'Shell: %s\n\n' "${SHELL:-Unknown}" 2> /dev/null || return 0
 }
 
@@ -1035,9 +868,6 @@ show_help() {
     printf "  %s%-28s%s %s\n" "$GREEN" "mo history --json" "$NC" "Export cleanup history"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo purge --dry-run" "$NC" "Preview project purge"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo installer --dry-run" "$NC" "Preview installer cleanup"
-    if [[ "${MOLE_PLATFORM:-}" == "darwin" ]]; then
-        printf "  %s%-28s%s %s\n" "$GREEN" "mo touchid enable --dry-run" "$NC" "Preview Touch ID setup"
-    fi
     printf "  %s%-28s%s %s\n" "$GREEN" "mo completion --dry-run" "$NC" "Preview shell completion edits"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo purge --paths" "$NC" "Configure scan directories"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo analyze /Volumes" "$NC" "Analyze external drives only"
@@ -1050,7 +880,7 @@ show_help() {
     echo
 }
 
-# Update flow (Homebrew or installer).
+# Update flow (script installer).
 update_mole() (
     local force_update="${1:-false}"
     local nightly_update="${2:-false}"
@@ -1070,20 +900,6 @@ update_mole() (
     }
     trap '_update_cleanup; update_interrupted=true; echo ""; exit 130' INT TERM
     trap '_update_cleanup' EXIT
-
-    # Homebrew is a darwin-only channel. Linux installs always follow the
-    # fork's script installer, even when a Linuxbrew binary happens to exist.
-    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]] && is_homebrew_install; then
-        if [[ "$nightly_update" == "true" ]]; then
-            local review_icon="${ICON_REVIEW:-⊙}"
-            log_error "Nightly update is only available for script installations. Homebrew installs follow stable releases."
-            printf '%s Reinstall via script to use: mo update --nightly\n' "$review_icon"
-            exit 1
-        fi
-        update_via_homebrew "$VERSION"
-        exit 0
-    fi
-
     # Resolve the invoked Mole up front so the installer targets this manual
     # install, not another mole earlier in PATH. Fail before any download.
     local mole_path
@@ -1237,7 +1053,7 @@ update_mole() (
         if [[ -t 1 ]]; then stop_inline_spinner; fi
         rm -f "$tmp_installer"
         log_error "curl or wget required"
-        echo -e "${ICON_REVIEW} Install curl with: ${GRAY}brew install curl${NC}"
+        echo -e "${ICON_REVIEW} Install curl or wget and try again.${NC}"
         exit 1
     fi
 
@@ -1252,7 +1068,6 @@ update_mole() (
     if [[ "$requires_sudo" == "true" ]]; then
         if ! request_sudo_access "Mole update requires admin access"; then
             log_error "Update aborted, admin access denied"
-            rm -f "$tmp_installer"
             exit 1
         fi
         # Start sudo keepalive to prevent cache expiration during install

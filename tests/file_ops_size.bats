@@ -182,35 +182,6 @@ EOF
     [[ "$output" == *"RC=124 SIZE= TARGET=stalled-dir"* ]]
 }
 
-@test "get_path_size_kb uses physical metadata for app bundles" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "mdls metadata exists only on macOS"
-    fi
-    mkdir -p "$SANDBOX/Sized.app"
-
-    run env PROJECT_ROOT="$PROJECT_ROOT" SANDBOX="$SANDBOX" \
-        /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-run_with_timeout() {
-    shift
-    if [[ "$1" == "mdls" && "$*" == *"kMDItemPhysicalSize"* ]]; then
-        printf '4096\n'
-        return 0
-    fi
-    if [[ "$1" == "mdls" && "$*" == *"kMDItemLogicalSize"* ]]; then
-        printf '8192\n'
-        return 0
-    fi
-    return 1
-}
-
-get_path_size_kb "$SANDBOX/Sized.app"
-EOF
-
-    [ "$status" -eq 0 ] || return 1
-    [ "$output" = "4" ]
-}
 
 @test "get_path_size_kb rejects partial du output on scan failure" {
     mkdir -p "$SANDBOX/partial-dir"

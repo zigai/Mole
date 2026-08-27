@@ -95,12 +95,6 @@ func collectCPUWithOptions(includeSlowFallbacks bool) (CPUStatus, error) {
 		}
 	}
 
-	// P/E core counts for Apple Silicon.
-	var pCores, eCores int
-	if includeSlowFallbacks {
-		pCores, eCores = getCoreTopology()
-	}
-
 	return CPUStatus{
 		Usage:            totalPercent,
 		PerCore:          percents,
@@ -110,79 +104,11 @@ func collectCPUWithOptions(includeSlowFallbacks bool) (CPUStatus, error) {
 		Load15:           loadAvg.Load15,
 		CoreCount:        counts,
 		LogicalCPU:       logical,
-		PCoreCount:       pCores,
-		ECoreCount:       eCores,
 	}, nil
 }
 
 func isZeroLoad(avg load.AvgStat) bool {
 	return avg.Load1 == 0 && avg.Load5 == 0 && avg.Load15 == 0
-}
-
-var (
-	// Cache for core topology.
-	lastTopologyAt   time.Time
-	cachedP, cachedE int
-	topologyTTL      = 10 * time.Minute
-)
-
-// getCoreTopology returns P/E core counts on Apple Silicon.
-func getCoreTopology() (pCores, eCores int) {
-	if runtime.GOOS != "darwin" {
-		return 0, 0
-	}
-
-	now := time.Now()
-	if cachedP > 0 || cachedE > 0 {
-		if now.Sub(lastTopologyAt) < topologyTTL {
-			return cachedP, cachedE
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	out, err := runCmd(ctx, "sysctl", "-n",
-		"hw.perflevel0.logicalcpu",
-		"hw.perflevel1.logicalcpu")
-	if err != nil {
-		return 0, 0
-	}
-
-	pCores, eCores = parseCoreTopology(out)
-	if pCores == 0 && eCores == 0 {
-		return 0, 0
-	}
-
-	cachedP, cachedE = pCores, eCores
-	lastTopologyAt = now
-	return pCores, eCores
-}
-
-// parseCoreTopology reads `sysctl -n hw.perflevel0.logicalcpu
-// hw.perflevel1.logicalcpu` output as top tier then the tier below it.
-//
-// The level ORDER decides which bucket a count lands in, never the level name.
-// M5 names its two levels "Super" and "Performance" and ships no "Efficiency"
-// level at all, so matching the word "performance" put 12 efficiency cores in
-// the P bucket and reported e_core_count 0 on an 18-core M5 Pro, which also
-// dropped the "12P+4E" load line entirely. Apple documents perflevel0 as the
-// highest-performance level, and that survives the next rename.
-func parseCoreTopology(out string) (pCores, eCores int) {
-	var lines []string
-	for line := range strings.Lines(strings.TrimSpace(out)) {
-		lines = append(lines, line)
-	}
-	if len(lines) < 2 {
-		return 0, 0
-	}
-
-	pCores, errP := strconv.Atoi(strings.TrimSpace(lines[0]))
-	eCores, errE := strconv.Atoi(strings.TrimSpace(lines[1]))
-	if errP != nil || errE != nil || pCores <= 0 || eCores <= 0 {
-		return 0, 0
-	}
-	return pCores, eCores
 }
 
 func fallbackLoadAvgFromUptime() (load.AvgStat, error) {

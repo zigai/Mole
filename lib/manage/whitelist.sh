@@ -25,7 +25,6 @@ readonly WHITELIST_CONFIG_OPTIMIZE_LEGACY="$HOME/.config/mole/whitelist_checks"
 # Default / safety whitelist patterns defined in lib/core/base.sh:
 # - DEFAULT_WHITELIST_PATTERNS
 # - SAFETY_WHITELIST_PATTERNS (always merged for clean mode)
-# - FINDER_METADATA_SENTINEL
 
 # Save whitelist patterns to config (defaults to "clean" for legacy callers)
 save_whitelist_patterns() {
@@ -125,48 +124,6 @@ Ollama local AI models|$HOME/.ollama/models/*|ai_ml_cache
 Docker BuildX cache|$HOME/.docker/buildx/cache/*|container_cache
 Podman container cache|$HOME/.local/share/containers/cache/*|container_cache
 EOF
-    # macOS-only stores ($HOME/Library/** and Mac app containers) are noise on
-    # a Linux host where those paths never exist; offer them only on darwin.
-    if [[ "${MOLE_PLATFORM:-darwin}" != "linux" ]]; then
-        cat << 'EOF'
-Apple Mail cache|$HOME/Library/Caches/com.apple.mail/*|system_cache
-Xcode DerivedData (build outputs, indexes)|$HOME/Library/Developer/Xcode/DerivedData/*|ide_cache
-Xcode internal cache files|$HOME/Library/Caches/com.apple.dt.Xcode/*|ide_cache
-Xcode iOS device support symbols|$HOME/Library/Developer/Xcode/iOS DeviceSupport/*/Symbols/System/Library/Caches/*|ide_cache
-JetBrains IDEs data (IntelliJ, PyCharm, WebStorm, GoLand)|$HOME/Library/Application Support/JetBrains/*|ide_cache
-JetBrains IDEs cache|$HOME/Library/Caches/JetBrains/*|ide_cache
-Android Studio cache and indexes|$HOME/Library/Caches/Google/AndroidStudio*/*|ide_cache
-VS Code runtime cache|$HOME/Library/Application Support/Code/Cache/*|ide_cache
-VS Code extension and update cache|$HOME/Library/Application Support/Code/CachedData/*|ide_cache
-VS Code system cache (Cursor, VSCodium)|$HOME/Library/Caches/com.microsoft.VSCode/*|ide_cache
-Cursor editor cache|$HOME/Library/Caches/com.todesktop.230313mzl4w4u92/*|ide_cache
-LM Studio app cache|$HOME/Library/Caches/com.lmstudio.lmstudio/*|ai_ml_cache
-Codex Desktop update staging|$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation|ai_ml_cache
-Chrome on-device AI models|$HOME/Library/Application Support/Google/Chrome/OptGuideOnDevice*/*|ai_ml_cache
-Chrome optimization guide models|$HOME/Library/Application Support/Google/Chrome/optimization_guide_model_store/*|ai_ml_cache
-PyInstaller binary cache|$HOME/Library/Application Support/pyinstaller/bincache*|compiler_cache
-CocoaPods cache (iOS dependencies)|$HOME/Library/Caches/CocoaPods/*|package_manager
-R renv global cache (virtual environments)|$HOME/Library/Caches/org.R-project.R/R/renv/*|package_manager
-tealdeer tldr pages cache|$HOME/Library/Caches/tealdeer/tldr-pages|package_manager
-Homebrew downloaded packages|$HOME/Library/Caches/Homebrew/*|package_manager
-pnpm package store|$HOME/Library/pnpm/store/*|package_manager
-Composer PHP dependencies cache|$HOME/Library/Caches/composer/*|package_manager
-Playwright browser binaries|$HOME/Library/Caches/ms-playwright*|ai_ml_cache
-Safari web browser cache|$HOME/Library/Caches/com.apple.Safari/*|browser_cache
-Chrome browser cache|$HOME/Library/Caches/Google/Chrome/*|browser_cache
-Firefox browser cache|$HOME/Library/Caches/Firefox/*|browser_cache
-Brave browser cache|$HOME/Library/Caches/BraveSoftware/Brave-Browser/*|browser_cache
-Surge proxy cache|$HOME/Library/Caches/com.nssurge.surge-mac/*|network_tools
-Surge configuration and data|$HOME/Library/Application Support/com.nssurge.surge-mac/*|network_tools
-Tart OCI/IPSW cache|$HOME/.tart/cache|container_cache
-Font cache|$HOME/Library/Caches/com.apple.FontRegistry/*|system_cache
-Spotlight metadata cache|$HOME/Library/Caches/com.apple.spotlight/*|system_cache
-CloudKit cache|$HOME/Library/Caches/CloudKit/*|system_cache
-Trash|$HOME/.Trash|system_cache
-iOS/iPadOS device firmware (.ipsw) from iTunes/Finder|$HOME/Library/iTunes/*Software Updates/*.ipsw|system_cache
-Apple Configurator 2 device firmware (.ipsw)|$HOME/Library/Group Containers/*.group.com.apple.configurator/**/*.ipsw|system_cache
-EOF
-    fi
     local go_cache_root
     if go_cache_root=$(mole_go_cache_root GOCACHE); then
         printf 'Go build cache|%s/*|compiler_cache\n' "$go_cache_root"
@@ -178,12 +135,6 @@ EOF
     if github_cache_root=$(mole_github_cli_cache_root); then
         printf 'GitHub CLI cache|%s/gh|network_tools\n' "$github_cache_root"
     fi
-    local darwin_user_cache
-    if darwin_user_cache=$(mole_darwin_user_cache_root); then
-        printf 'Clang module cache|%s/clang/*|compiler_cache\n' "$darwin_user_cache"
-    fi
-    # Add FINDER_METADATA with constant reference
-    echo "Finder metadata, .DS_Store|$FINDER_METADATA_SENTINEL|system_cache"
 }
 
 # Get all optimize items with their patterns

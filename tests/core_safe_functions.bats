@@ -117,17 +117,6 @@ teardown() {
     [[ "$output" == *"resolves into a critical system path"* ]] || return 1
 }
 
-@test "validate_path_for_deletion rejects a target whose ancestor symlink redirects into protected user data" {
-    local protected_home="$TEST_DIR/home"
-    mkdir -p "$protected_home/Library/Keychains"
-    local fake_cache_root="$TEST_DIR/cache-root"
-    ln -s "$protected_home/Library" "$fake_cache_root"
-
-    # should_protect_path is home-relative, so drive it against a fake HOME.
-    run /bin/bash -c "export HOME='$protected_home'; source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$fake_cache_root/Keychains/login.keychain-db'"
-    [ "$status" -eq 1 ]
-}
-
 @test "validate_path_for_deletion still accepts an ordinary path under a real directory" {
     # The ancestor guard is deny-only: it must not reject legitimate targets
     # whose ancestors merely resolve (e.g. /tmp -> /private/tmp on macOS).
@@ -194,31 +183,6 @@ EOF
     [ "$status" -eq 0 ]
 }
 
-@test "validate_path_for_deletion rejects case aliases of critical roots" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "relies on a case-insensitive root filesystem (macOS APFS)"
-    fi
-    run /bin/bash -c "
-        source '$PROJECT_ROOT/lib/core/common.sh'
-        checked=0
-        for pair in \
-            '/SYSTEM|/System' \
-            '/DEV|/dev' \
-            '/PRIVATE/TMP|/private/tmp' \
-            '/PRIVATE/VAR/FOLDERS|/private/var/folders' \
-            '/USERS|/Users'; do
-            alias_path=\${pair%%|*}
-            canonical_path=\${pair#*|}
-            if [[ -e \"\$alias_path\" && \"\$alias_path\" -ef \"\$canonical_path\" ]]; then
-                checked=\$((checked + 1))
-                validate_path_for_deletion \"\$alias_path\" && exit 90
-            fi
-        done
-        [[ \$checked -gt 0 ]] || return 1
-    "
-    [ "$status" -eq 0 ]
-}
-
 @test "validate_path_for_deletion accepts CoreSimulator system cache children" {
     run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Developer/CoreSimulator/Caches/dyld'"
     [ "$status" -eq 0 ]
@@ -231,20 +195,6 @@ EOF
     run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Extensions/com.example.driver/com.apple.metal' 2>&1"
     [ "$status" -eq 1 ]
     [[ "$output" == *"critical system path"* ]]
-}
-
-@test "validate_path_for_deletion rejects endpoint-security agent var/folders caches" {
-    # Central chokepoint: every safe_remove / safe_sudo_remove caller is covered,
-    # not only the cleanup sweeps that pre-check the predicate.
-    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/9d/abc/C/com.crowdstrike.falcon.App/com.apple.metalfe'"
-    [ "$status" -eq 1 ]
-
-    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/PRIVATE/VAR/FOLDERS/9D/ABC/C/COM.CROWDSTRIKE.FALCON.APP/com.apple.metalfe'"
-    [ "$status" -eq 1 ]
-
-    # A normal app's Darwin cache shard stays deletable.
-    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/9d/abc/C/com.example.App/com.apple.metalfe'"
-    [ "$status" -eq 0 ]
 }
 
 @test "validate_path_for_deletion rejects the active powerlog database family" {
@@ -441,86 +391,6 @@ EOF
     [ "$status" -eq 0 ]
 }
 
-@test "should_protect_path applies high-risk cleanup denylist" {
-    run /bin/bash -c "
-        source '$PROJECT_ROOT/lib/core/common.sh'
-        should_protect_path '$HOME/Library/Caches/ms-playwright/chromium-123'
-        should_protect_path '$HOME/Library/Caches/com.apple.homed/state'
-        should_protect_path '$HOME/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite'
-        should_protect_path '$HOME/Library/Preferences/com.paceap.eden.iLokLicenseManager.plist'
-        should_protect_path '/private/var/folders/aa/bb/C/com.native-instruments.NativeAccess/license'
-        should_protect_path '/Library/Audio/Plug-Ins/VST3/Example.vst3'
-        should_protect_data 'com.native-instruments.NativeAccess'
-        ! should_protect_path '$HOME/Library/Application Support/Example/Cache/item'
-    "
-    [ "$status" -eq 0 ]
-}
-
-@test "is_endpoint_security_cache_path matches only EDR agent var/folders caches" {
-    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-
-# Deleting anything an EDR agent owns under the per-user Darwin folder trips
-# sensor tamper detection (CrowdStrike MacFalconSensorTamper, MITRE T1562.001).
-# The matcher covers the vendor bundle id anywhere under var/folders: the C/
-# shader cache that triggered the real corporate alert, the X/ code-signature
-# clone, and T/ temp. Protection-only, so a wide match within var/folders is
-# intentional.
-is_endpoint_security_cache_path "/private/var/folders/9d/abc123/C/com.crowdstrike.falcon.App/com.apple.metalfe"
-is_endpoint_security_cache_path "/private/var/folders/9d/abc123/X/com.crowdstrike.falcon.App.code_sign_clone"
-is_endpoint_security_cache_path "/private/var/folders/aa/bb/T/com.crowdstrike.falcon.App/scratch"
-is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.sentinelone.agent/com.apple.metal"
-is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.jamf.management/com.apple.gpuarchiver"
-is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.paloaltonetworks.GlobalProtect/com.apple.metalfe"
-is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.eset.endpoint/com.apple.metal"
-is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.sentinel-labs.agent/com.apple.metalfe"
-is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.jamfsoftware.selfservice/com.apple.gpuarchiver"
-is_endpoint_security_cache_path "/private/var/folders/aa/bb/X/com.cisco.anyconnect.gui.code_sign_clone"
-is_endpoint_security_cache_path "/private/var/folders/aa/bb/X/com.cisco.secureclient.gui.code_sign_clone"
-# A normal third-party app's cache is not an EDR cache.
-! is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.example.App/com.apple.metalfe"
-# Non-security Cisco products (e.g. Webex) are not matched; only the secure-access clients are.
-! is_endpoint_security_cache_path "/private/var/folders/aa/bb/X/com.cisco.webex.code_sign_clone"
-# Paths outside var/folders are out of scope for this predicate.
-! is_endpoint_security_cache_path "/Applications/Falcon.app"
-# A non-Darwin path that merely contains "var/folders" must NOT match (anchored).
-! is_endpoint_security_cache_path "/Users/me/project/var/folders/com.crowdstrike.fixture/cache"
-EOF
-
-    [ "$status" -eq 0 ]
-}
-
-@test "should_protect_path protects endpoint-security / EDR agent caches (CrowdStrike Falcon tamper)" {
-    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-
-# Matched by the dedicated EDR predicate before any bundle/filename fallback,
-# so the result is deterministic regardless of nounset/source order.
-should_protect_path "/private/var/folders/9d/abc123/C/com.crowdstrike.falcon.App/com.apple.metalfe"
-should_protect_path "/private/var/folders/aa/bb/C/com.sentinelone.agent/com.apple.metal"
-EOF
-
-    [ "$status" -eq 0 ]
-}
-
-@test "should_protect_path protects OrbStack live container data" {
-    local orb_group_data="$HOME/Library/Group Containers/HUAQ24HBR6.dev.orbstack/data/data.img.raw"
-    local orb_state="$HOME/.orbstack/state.db"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" ORB_GROUP_DATA="$orb_group_data" ORB_STATE="$orb_state" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-should_protect_data "dev.orbstack.OrbStack"
-should_protect_data "dev.kdrag0n.MacVirt"
-should_protect_path "$ORB_GROUP_DATA"
-should_protect_path "$ORB_STATE"
-EOF
-
-    [ "$status" -eq 0 ]
-}
-
 @test "safe_remove validates path before deletion" {
     run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '/System/test' 2>&1"
     [ "$status" -eq 1 ]
@@ -622,48 +492,6 @@ SCRIPT
     [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
     [ "$elapsed" -lt 3 ]
     [ -e "$target_file" ]
-}
-
-@test "safe_remove refuses a compiled model cache created during size probing" {
-    local target_dir="$TEST_DIR/compiled-model-race"
-    mkdir -p "$target_dir"
-    touch "$target_dir/data"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" /bin/bash --noprofile --norc <<'SCRIPT'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-oplog_enabled() { return 0; }
-get_path_size_kb() {
-    mkdir -p "$1/com.apple.e5rt.e5bundlecache"
-    echo 1
-}
-rm() { echo "UNEXPECTED_REMOVE:$*"; return 99; }
-safe_remove "$TARGET_DIR" true && rc=0 || rc=$?
-printf 'RC=%s\n' "$rc"
-[[ -d "$TARGET_DIR/com.apple.e5rt.e5bundlecache" ]]
-SCRIPT
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"RC=1"* ]] || return 1
-    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
-}
-
-@test "safe_remove dry-run refuses an existing compiled model cache" {
-    local target_dir="$TEST_DIR/compiled-model-dry-run"
-    mkdir -p "$target_dir/com.apple.e5rt.e5bundlecache"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" /bin/bash --noprofile --norc <<'SCRIPT'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-MOLE_DRY_RUN=1
-record_dry_run_cleanup_target() { echo "UNEXPECTED_REGISTER:$1"; }
-safe_remove "$TARGET_DIR" true && rc=0 || rc=$?
-printf 'RC=%s\n' "$rc"
-SCRIPT
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"RC=1"* ]] || return 1
-    [[ "$output" != *"UNEXPECTED_REGISTER"* ]]
 }
 
 @test "safe_remove in silent mode suppresses error output" {
@@ -789,61 +617,6 @@ SCRIPT
     [ -e "$target_dir/data" ]
 }
 
-@test "safe_sudo_remove refuses a compiled model cache created during size probing" {
-    local target_dir="$TEST_DIR/compiled-model-sudo-race"
-    mkdir -p "$target_dir"
-    touch "$target_dir/data"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
-        MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-_mole_privileged_path_has_mutable_ancestor() { return 1; }
-oplog_enabled() { return 0; }
-sudo() {
-    if [[ "${1:-}" == "-n" && "${2:-}" == "test" ]]; then
-        shift 2
-        command test "$@"
-        return $?
-    fi
-    if [[ "${1:-}" == "-n" && "${2:-}" == "du" ]]; then
-        mkdir -p "$TARGET_DIR/com.apple.e5rt.e5bundlecache"
-        printf '1 %s\n' "$TARGET_DIR"
-        return 0
-    fi
-    echo "UNEXPECTED_SUDO:$*"
-    return 99
-}
-safe_sudo_remove "$TARGET_DIR" && rc=0 || rc=$?
-printf 'RC=%s\n' "$rc"
-[[ -d "$TARGET_DIR/com.apple.e5rt.e5bundlecache" ]]
-SCRIPT
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"RC=13"* ]] || return 1
-    [[ "$output" != *"UNEXPECTED_SUDO"* ]]
-}
-
-@test "safe_sudo_remove dry-run refuses an existing compiled model cache" {
-    local target_dir="$TEST_DIR/compiled-model-sudo-dry-run"
-    mkdir -p "$target_dir/com.apple.e5rt.e5bundlecache"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
-        MOLE_TEST_MODE=1 MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'SCRIPT'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-MOLE_DRY_RUN=1
-_mole_privileged_path_has_mutable_ancestor() { return 1; }
-record_dry_run_cleanup_target() { echo "UNEXPECTED_REGISTER:$1"; }
-safe_sudo_remove "$TARGET_DIR" && rc=0 || rc=$?
-printf 'RC=%s\n' "$rc"
-SCRIPT
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"RC=13"* ]] || return 1
-    [[ "$output" != *"UNEXPECTED_REGISTER"* ]]
-}
-
 @test "safe_sudo_remove returns auth failure when noninteractive sudo expires" {
     local target_dir="$TEST_DIR/sudo-expired"
     mkdir -p "$target_dir"
@@ -874,21 +647,6 @@ SCRIPT
     [ "$status" -eq 0 ]
     [[ "$output" == *"RC=11"* ]] || return 1
     [[ "$output" != *"INTERACTIVE_SUDO"* ]]
-}
-
-@test "safe_sudo_remove returns protected-path code for safety skips" {
-    local target_dir="/private/var/folders/9d/abc/C/com.crowdstrike.falcon.App/com.apple.metalfe"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" /bin/bash --noprofile --norc <<'SCRIPT'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-
-safe_sudo_remove "$TARGET_DIR" && rc=0 || rc=$?
-echo "RC=$rc"
-SCRIPT
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"RC=13"* ]]
 }
 
 @test "safe_sudo_find_delete never opens an interactive sudo prompt" {
@@ -1197,91 +955,6 @@ SCRIPT
     [[ "$output" == *"LEADING=1"* ]]
 }
 
-@test "get_path_size_kb bounds the app metadata fast path" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow (mdls .app metadata sizing)"
-    fi
-    local app_dir="$TEST_DIR/Stalled.app"
-    local mock_bin="$TEST_DIR/stalled-mdls-bin"
-    local trace="$TEST_DIR/stalled-mdls.trace"
-    mkdir -p "$app_dir" "$mock_bin"
-
-    cat > "$mock_bin/mdls" <<'MOCK'
-#!/bin/bash
-printf 'mdls %s\n' "$*" >> "$MOLE_MDLS_TRACE"
-exec sleep 4
-MOCK
-    chmod +x "$mock_bin/mdls"
-    cat > "$mock_bin/du" <<'MOCK'
-#!/bin/bash
-printf 'UNEXPECTED_DU %s\n' "$*" >> "$MOLE_MDLS_TRACE"
-exec sleep 4
-MOCK
-    chmod +x "$mock_bin/du"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" APP_DIR="$app_dir" \
-        PATH="$mock_bin:$PATH" MOLE_MDLS_TRACE="$trace" \
-        /bin/bash --noprofile --norc <<'SCRIPT'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-started=$(date +%s)
-set +e
-# Budget must be >= 2s. SECONDS has whole-second granularity, so a 1s budget
-# is really "until the next second boundary" and can collapse to nearly zero,
-# returning 124 before mdls is ever spawned. Two seconds always leaves at
-# least a full second for the probe, which is what this case asserts on.
-size=$(get_path_size_kb "$APP_DIR" 2)
-size_rc=$?
-set -e
-elapsed=$(( $(date +%s) - started ))
-printf 'SIZE=%s\nRC=%s\nELAPSED=%s\n' "$size" "$size_rc" "$elapsed"
-[[ $size_rc -eq 124 ]]
-SCRIPT
-
-    [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"SIZE="* ]] || return 1
-    [[ "$output" == *"RC=124"* ]] || return 1
-    [[ "$(< "$trace")" == *"$app_dir"* ]] || return 1
-    [[ "$(< "$trace")" != *"UNEXPECTED_DU"* ]] || return 1
-    local elapsed="${output##*ELAPSED=}"
-    [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
-    [ "$elapsed" -lt 4 ]
-}
-
-@test "safe_remove stops when a size probe is interrupted" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow (mdls size probe interrupt)"
-    fi
-    local app_dir="$TEST_DIR/Interrupted.app"
-    mkdir -p "$app_dir"
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" APP_DIR="$app_dir" \
-        /bin/bash --noprofile --norc <<'SCRIPT'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-run_with_timeout() {
-    local _duration="$1"
-    shift
-    if [[ "${1:-}" == "mdls" ]]; then
-        return 130
-    fi
-    "$@"
-}
-rm() {
-    printf 'UNEXPECTED_REMOVE:%s\n' "$*"
-    return 99
-}
-rc=0
-safe_remove "$APP_DIR" true || rc=$?
-printf 'RC=%s\n' "$rc"
-[[ -d "$APP_DIR" ]]
-SCRIPT
-
-    [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"RC=130"* ]] || return 1
-    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
-}
-
 @test "safe_sudo_find_delete propagates interrupts from every sudo preflight" {
     local target_dir="$TEST_DIR/sudo-preflight-interrupt-target"
     mkdir -p "$target_dir"
@@ -1343,12 +1016,8 @@ SCRIPT
     local target_dir="$TEST_DIR/sudo-age-refresh-target"
     local target_file="$target_dir/old.log"
     mkdir -p "$target_dir"
-    # BSD date -t vs GNU touch -d: same 8-days-old mtime on both platforms.
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        touch -t "$(date -v-8d '+%Y%m%d%H%M.%S')" "$target_file"
-    else
-        touch -d '8 days ago' "$target_file"
-    fi
+    # GNU touch: same 8-days-old mtime.
+    touch -d '8 days ago' "$target_file"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" TARGET_FILE="$target_file" \
         MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'

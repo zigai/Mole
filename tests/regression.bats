@@ -82,52 +82,18 @@ setup() {
 }
 
 @test "network timeout prevents hanging (simulated)" {
-    if ! command -v gtimeout >/dev/null 2>&1 && ! command -v timeout >/dev/null 2>&1; then
-        skip "gtimeout/timeout not available"
+    if ! command -v timeout >/dev/null 2>&1; then
+        skip "timeout not available"
     fi
 
-    timeout_cmd="timeout"
-    command -v timeout >/dev/null 2>&1 || timeout_cmd="gtimeout"
-
     # shellcheck disable=SC2016
-    result=$($timeout_cmd 5 /bin/bash -c '
+    result=$(timeout 5 /bin/bash -c '
         result=$(curl -fsSL --connect-timeout 1 --max-time 2 "http://192.0.2.1:12345/test" 2>/dev/null || echo "failed")
         if [[ "$result" == "failed" ]]; then
             echo "timeout_works"
         fi
     ')
     [[ "$result" == "timeout_works" ]]
-}
-
-@test "run_with_timeout perl fallback stops TERM-ignoring commands" {
-    local fake_dir="$BATS_TEST_TMPDIR/timeout-bin"
-    mkdir -p "$fake_dir"
-    local fake_cmd="$fake_dir/hang.sh"
-
-    cat > "$fake_cmd" <<'EOF'
-#!/bin/bash
-trap "" TERM
-sleep 5
-EOF
-    chmod +x "$fake_cmd"
-
-    run /usr/bin/perl -e 'alarm 5; exec @ARGV' env FAKE_CMD="$fake_cmd" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/timeout.sh"
-MO_TIMEOUT_BIN=""
-MO_TIMEOUT_PERL_BIN="${MO_TIMEOUT_PERL_BIN:-$(command -v perl)}"
-SECONDS=0
-set +e
-run_with_timeout 1 "$FAKE_CMD"
-status=$?
-set -e
-echo "STATUS=$status ELAPSED=$SECONDS"
-EOF
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"STATUS=124"* ]] || return 1
-    elapsed=$(printf '%s\n' "$output" | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^ELAPSED=/) {split($i, kv, "="); print kv[2]}}' | tail -1)
-    [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
-    (( elapsed < 6 ))
 }
 
 @test "empty version string is handled gracefully" {

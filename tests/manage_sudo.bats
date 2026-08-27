@@ -10,24 +10,6 @@ setup() {
     source "$PROJECT_ROOT/lib/core/sudo.sh"
 }
 
-@test "check_touchid_support falls back to legacy sudo when sudo_local is present" {
-    local pam_sudo="$BATS_TEST_TMPDIR/sudo"
-    local pam_sudo_local="$BATS_TEST_TMPDIR/sudo_local"
-
-    printf 'auth sufficient pam_tid.so\n' > "$pam_sudo"
-    printf 'auth include pam_opendirectory.so\n' > "$pam_sudo_local"
-    export MOLE_PAM_SUDO_FILE="$pam_sudo"
-    export MOLE_PAM_SUDO_LOCAL_FILE="$pam_sudo_local"
-
-    run check_touchid_support
-    [ "$status" -eq 0 ]
-
-    printf 'auth include pam_opendirectory.so\n' > "$pam_sudo"
-
-    run check_touchid_support
-    [ "$status" -eq 1 ]
-}
-
 @test "has_sudo_session returns 1 when no sudo session" {
     # shellcheck disable=SC2329
     sudo() { return 1; }
@@ -89,7 +71,7 @@ setup() {
     [[ "$result" == "false" ]] || [[ -z "$result" ]]
 }
 
-@test "request_sudo_access clears four lines in clamshell mode when Touch ID hint is shown" {
+@test "request_sudo_access clears the prompt lines after password entry" {
     run /bin/bash -c '
         unset MOLE_TEST_MODE MOLE_TEST_NO_AUTH
         source "'"$PROJECT_ROOT"'/lib/core/common.sh"
@@ -106,37 +88,6 @@ setup() {
             esac
         }
         tty() { printf "%s\n" "$tty_file"; }
-        is_clamshell_mode() { return 0; }
-        check_touchid_support() { return 0; }
-        _request_password() { return 0; }
-        safe_clear_lines() { printf "CLEAR:%s\n" "$1"; }
-
-        request_sudo_access "Admin access required"
-    '
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"CLEAR:4"* ]]
-}
-
-@test "request_sudo_access keeps three-line cleanup in clamshell mode without Touch ID" {
-    run /bin/bash -c '
-        unset MOLE_TEST_MODE MOLE_TEST_NO_AUTH
-        source "'"$PROJECT_ROOT"'/lib/core/common.sh"
-        source "'"$PROJECT_ROOT"'/lib/core/sudo.sh"
-
-        tty_file="$(mktemp)"
-        chmod 600 "$tty_file"
-
-        sudo() {
-            case "$1" in
-                -n) return 1 ;;
-                -k) return 0 ;;
-                *) return 1 ;;
-            esac
-        }
-        tty() { printf "%s\n" "$tty_file"; }
-        is_clamshell_mode() { return 0; }
-        check_touchid_support() { return 1; }
         _request_password() { return 0; }
         safe_clear_lines() { printf "CLEAR:%s\n" "$1"; }
 

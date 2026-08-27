@@ -15,8 +15,6 @@ source "$SCRIPT_DIR/lib/core/common.sh"
 # Clean temp files on exit.
 trap cleanup_temp_files EXIT INT TERM
 source "$SCRIPT_DIR/lib/core/sudo.sh"
-source "$SCRIPT_DIR/lib/optimize/diagnostics.sh"
-source "$SCRIPT_DIR/lib/optimize/maintenance.sh"
 source "$SCRIPT_DIR/lib/optimize/catalog.sh"
 source "$SCRIPT_DIR/lib/optimize/tasks.sh"
 source "$SCRIPT_DIR/lib/check/health_json.sh"
@@ -252,7 +250,7 @@ main() {
         fi
         echo ""
         log_error "Invalid system health data format"
-        echo -e "${GRAY}${ICON_REVIEW}${NC} Check if awk, sysctl, and df commands are available"
+        echo -e "${GRAY}${ICON_REVIEW}${NC} Check if awk and df commands are available"
         exit 1
     fi
 
@@ -273,8 +271,6 @@ main() {
     fi
 
     show_system_health "$health_json"
-
-    run_optimize_diagnostics
 
     echo ""
     # Track sudo availability so individual tasks can skip cleanly when admin

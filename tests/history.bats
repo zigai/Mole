@@ -20,13 +20,9 @@ teardown_file() {
     fi
 }
 
-# Log root differs per platform since the Linux port (XDG state dir).
+# Log root lives under the XDG state dir.
 _mole_test_log_root() {
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        printf '%s\n' "$HOME/Library/Logs/mole"
-    else
-        printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/mole"
-    fi
+    printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/mole"
 }
 
 setup() {

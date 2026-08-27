@@ -32,28 +32,6 @@ func TestCreateInsightEntries(t *testing.T) {
 	}
 }
 
-func TestCreateInsightEntriesIncludesOrbStackData(t *testing.T) {
-	skipIfNotDarwin(t)
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	orbstackData := filepath.Join(home, "Library", "Group Containers", "HUAQ24HBR6.dev.orbstack", "data")
-	if err := os.MkdirAll(orbstackData, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	entries := createInsightEntries()
-	for _, entry := range entries {
-		if entry.Name == "OrbStack Data" {
-			if entry.Path != orbstackData {
-				t.Fatalf("OrbStack path = %q, want %q", entry.Path, orbstackData)
-			}
-			return
-		}
-	}
-	t.Fatal("OrbStack Data insight not found")
-}
-
 func TestCreateInsightEntriesIncludesUvCache(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

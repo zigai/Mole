@@ -1,13 +1,10 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"os"
-	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -165,22 +162,6 @@ func collectProxy() ProxyStatus {
 		return proxy
 	}
 
-	// macOS: check system proxy via scutil.
-	if runtime.GOOS == "darwin" {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		defer cancel()
-		out, err := runCmd(ctx, "scutil", "--proxy")
-		if err == nil {
-			if proxy := collectProxyFromScutilOutput(out); proxy.Enabled {
-				return proxy
-			}
-		}
-
-		if proxy := collectProxyFromTunInterfaces(); proxy.Enabled {
-			return proxy
-		}
-	}
-
 	return ProxyStatus{Enabled: false}
 }
 
@@ -213,99 +194,6 @@ func collectProxyFromEnv(getenv func(string) string) ProxyStatus {
 	return ProxyStatus{Enabled: false}
 }
 
-func collectProxyFromScutilOutput(out string) ProxyStatus {
-	if out == "" {
-		return ProxyStatus{Enabled: false}
-	}
-
-	if scutilProxyEnabled(out, "SOCKSEnable") {
-		host := joinHostPort(scutilProxyValue(out, "SOCKSProxy"), scutilProxyValue(out, "SOCKSPort"))
-		if host == "" {
-			host = "System Proxy"
-		}
-		return ProxyStatus{Enabled: true, Type: "SOCKS", Host: host}
-	}
-
-	if scutilProxyEnabled(out, "HTTPSEnable") {
-		host := joinHostPort(scutilProxyValue(out, "HTTPSProxy"), scutilProxyValue(out, "HTTPSPort"))
-		if host == "" {
-			host = "System Proxy"
-		}
-		return ProxyStatus{Enabled: true, Type: "HTTPS", Host: host}
-	}
-
-	if scutilProxyEnabled(out, "HTTPEnable") {
-		host := joinHostPort(scutilProxyValue(out, "HTTPProxy"), scutilProxyValue(out, "HTTPPort"))
-		if host == "" {
-			host = "System Proxy"
-		}
-		return ProxyStatus{Enabled: true, Type: "HTTP", Host: host}
-	}
-
-	if scutilProxyEnabled(out, "ProxyAutoConfigEnable") {
-		pacURL := scutilProxyValue(out, "ProxyAutoConfigURLString")
-		host := parseProxyHost(pacURL)
-		if host == "" {
-			host = "PAC"
-		}
-		return ProxyStatus{Enabled: true, Type: "PAC", Host: host}
-	}
-
-	if scutilProxyEnabled(out, "ProxyAutoDiscoveryEnable") {
-		return ProxyStatus{Enabled: true, Type: "WPAD", Host: "Auto Discovery"}
-	}
-
-	return ProxyStatus{Enabled: false}
-}
-
-func collectProxyFromTunInterfaces() ProxyStatus {
-	stats, err := collectIOCountersSafely()
-	if err != nil {
-		return ProxyStatus{Enabled: false}
-	}
-
-	var activeTun []string
-	for _, s := range stats {
-		lower := strings.ToLower(s.Name)
-		if strings.HasPrefix(lower, "utun") || strings.HasPrefix(lower, "tun") {
-			if s.BytesRecv+s.BytesSent > 0 {
-				activeTun = append(activeTun, s.Name)
-			}
-		}
-	}
-	if len(activeTun) == 0 {
-		return ProxyStatus{Enabled: false}
-	}
-	sort.Strings(activeTun)
-	host := activeTun[0]
-	if len(activeTun) > 1 {
-		host = activeTun[0] + "+"
-	}
-	// Reported as a tunnel, never as a proxy. This branch is only reached when
-	// no proxy is configured in the environment or in scutil, which is exactly
-	// the case where an active `utun` is most likely iCloud Private Relay or a
-	// VPN. Calling that "Proxy TUN" told users something false about a machine
-	// that has no proxy at all.
-	// Keep the existing JSON type value for automation consumers. IsTunnel is
-	// the presentation hint that lets the terminal UI use an honest label.
-	return ProxyStatus{Enabled: true, Type: "TUN", Host: host, IsTunnel: true}
-}
-
-func scutilProxyEnabled(out, key string) bool {
-	return scutilProxyValue(out, key) == "1"
-}
-
-func scutilProxyValue(out, key string) string {
-	prefix := key + " :"
-	for line := range strings.Lines(out) {
-		line = strings.TrimSpace(line)
-		if after, ok := strings.CutPrefix(line, prefix); ok {
-			return strings.TrimSpace(after)
-		}
-	}
-	return ""
-}
-
 func parseProxyHost(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -325,19 +213,4 @@ func parseProxyHost(raw string) string {
 		return ""
 	}
 	return strings.TrimPrefix(host, "@")
-}
-
-func joinHostPort(host, port string) string {
-	host = strings.TrimSpace(host)
-	port = strings.TrimSpace(port)
-	if host == "" {
-		return ""
-	}
-	if port == "" {
-		return host
-	}
-	if _, err := strconv.Atoi(port); err != nil {
-		return host
-	}
-	return host + ":" + port
 }

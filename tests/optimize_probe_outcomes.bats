@@ -14,235 +14,124 @@ teardown_file() {
 	fi
 }
 
-@test "system maintenance reports a failed Spotlight probe" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (mdutil/Spotlight maintenance)"
-	fi
-	run env HOME="$TEST_HOME/system" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-unset MOLE_TEST_NO_AUTH MOLE_TEST_MODE
-flush_dns_cache() { return 0; }
-mkdir -p "$HOME/bin"
-printf '#!/bin/bash\nexit 7\n' > "$HOME/bin/mdutil"
-chmod +x "$HOME/bin/mdutil"
-PATH="$HOME/bin:$PATH"
-
-execute_optimization system_maintenance
-[[ "$(optimize_outcome_count failed)" == "1" ]] || exit 1
-EOF
-
-	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Failed to verify Spotlight index"* ]] || return 1
-}
-
-@test "Spotlight optimization reports a failed status probe" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (Spotlight index optimization)"
-	fi
-	run env HOME="$TEST_HOME/spotlight" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-run_with_timeout() { return 124; }
-
-execute_optimization spotlight_index_optimize
-[[ "$(optimize_outcome_count failed)" == "1" ]] || exit 1
-EOF
-
-	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Failed to inspect Spotlight index (exit=124)"* ]] || return 1
-}
-
-@test "quarantine cleanup reports a failed row-count probe" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (Gatekeeper quarantine database)"
-	fi
-	run env HOME="$TEST_HOME/quarantine" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-db="$HOME/Library/Preferences/com.apple.LaunchServices.QuarantineEventsV2"
-mkdir -p "$(dirname "$db")"
-touch "$db"
-sqlite3() { return 0; }
-should_protect_path() { return 1; }
-run_with_timeout() { return 7; }
-
-execute_optimization quarantine_cleanup
-[[ "$(optimize_outcome_count failed)" == "1" ]] || exit 1
-EOF
-
-	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Failed to inspect quarantine database"* ]] || return 1
-}
-
-@test "login item audit reports a failed snapshot" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (login items audit)"
-	fi
-	run env HOME="$TEST_HOME/login" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-unset MOLE_TEST_NO_AUTH MOLE_TEST_MODE
-_login_items_snapshot() { return 7; }
-
-execute_optimization login_items_audit
-[[ "$(optimize_outcome_count failed)" == "1" ]] || exit 1
-EOF
-
-	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Failed to inspect login items"* ]] || return 1
-}
-
-@test "notification cleanup reports a failed size probe" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (Notification Center database)"
-	fi
-	run env HOME="$TEST_HOME/notification" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-getconf() { echo "$HOME/runtime"; }
-db="$HOME/runtime/com.apple.notificationcenter/db2/db"
-mkdir -p "$(dirname "$db")"
-touch "$db"
-opt_existing_file_size_kb_strict() { return 124; }
-
-execute_optimization notification_cleanup
-[[ "$(optimize_outcome_count failed)" == "1" ]] || exit 1
-EOF
-
-	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Failed to inspect Notification Center database size"* ]] || return 1
-}
-
-@test "CoreDuet cleanup reports a failed size probe" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (CoreDuet Knowledge database)"
-	fi
-	run env HOME="$TEST_HOME/coreduet-size" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-db="$HOME/Library/Application Support/Knowledge/knowledgeC.db"
-mkdir -p "$(dirname "$db")"
-touch "$db"
-run_with_timeout() { return 124; }
-
-execute_optimization coreduet_cleanup
-[[ "$(optimize_outcome_count failed)" == "1" ]] || exit 1
-EOF
-
-	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Failed to inspect Knowledge database size"* ]] || return 1
-}
-
-@test "sudo-dependent maintenance is skipped when admin access is denied" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (mdutil/mDNSResponder maintenance)"
-	fi
+@test "sudo-gated trim is skipped when admin access is denied" {
 	run env HOME="$TEST_HOME/admin" PROJECT_ROOT="$PROJECT_ROOT" MOLE_OPTIMIZE_SUDO_AVAILABLE=false /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-mdutil() { echo "UNEXPECTED_MDUTIL"; return 0; }
+unset MOLE_TEST_NO_AUTH MOLE_TEST_MODE
 
-execute_optimization system_maintenance
-execute_optimization network_optimization
-[[ "$(optimize_outcome_count skipped)" == "2" ]] || exit 1
-[[ "$(optimize_outcome_count failed)" == "0" ]] || exit 1
+mkdir -p "$HOME/bin"
+printf '#!/bin/bash\necho UNEXPECTED_FSTRIM\n' > "$HOME/bin/fstrim"
+chmod +x "$HOME/bin/fstrim"
+PATH="$HOME/bin:$PATH"
+_linux_has_ssd_device() { return 0; }
+
+execute_optimization ssd_trim
+[[ "$(optimize_outcome_count skipped)" == "1" ]] || exit 1
+[[ "$(optimize_outcome_count failed)" == "0" ]] || exit 2
 EOF
 
 	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
 	[[ "$output" == *"admin access required"* ]] || return 1
-	[[ "$output" != *"UNEXPECTED_MDUTIL"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_FSTRIM"* ]] || return 1
 }
 
-@test "Spotlight optimization reports failed speed probes" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (Spotlight speed probes)"
-	fi
-	run env HOME="$TEST_HOME/spotlight-speed" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+@test "failed plan command reports a failed task outcome" {
+	run env HOME="$TEST_HOME/flush-fail" PROJECT_ROOT="$PROJECT_ROOT" MOLE_OPTIMIZE_SUDO_AVAILABLE=false /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-run_with_timeout() {
-    if [[ "$2" == "mdutil" ]]; then
-        echo "Indexing enabled."
-        return 0
-    fi
-    return 7
-}
-is_ac_power() { return 0; }
-time_file="$HOME/probe-time"
-echo 0 > "$time_file"
-get_epoch_seconds() {
-    local call
-    call=$(cat "$time_file")
-    call=$((call + 1))
-    echo "$call" > "$time_file"
-    if ((call % 2 == 1)); then
-        echo 100
-    else
-        echo 110
-    fi
-}
-sleep() { return 0; }
 
-execute_optimization spotlight_index_optimize
-[[ "$(optimize_outcome_count failed)" == "1" ]] || exit 1
-EOF
-
-	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Spotlight speed check failed (2 probe(s))"* ]] || return 1
-}
-
-@test "saved state cleanup reports a failed discovery scan" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (Saved Application State)"
-	fi
-	run env HOME="$TEST_HOME/saved-scan" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-mkdir -p "$HOME/Library/Saved Application State" "$HOME/bin"
-printf '#!/bin/bash\nexit 7\n' > "$HOME/bin/find"
-chmod +x "$HOME/bin/find"
+mkdir -p "$HOME/bin"
+printf '#!/bin/bash\nexit 9\n' > "$HOME/bin/resolvectl"
+chmod +x "$HOME/bin/resolvectl"
 PATH="$HOME/bin:$PATH"
 
-execute_optimization saved_state_cleanup
+execute_optimization dns_cache_flush
 [[ "$(optimize_outcome_count failed)" == "1" ]] || exit 1
 EOF
 
 	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Failed to scan old saved states"* ]] || return 1
-	[[ "$output" != *"App saved states optimized"* ]] || return 1
-	[[ "$output" != *"Failed to remove"* ]] || return 1
+	[[ "$output" == *"Failed (exit=9): resolvectl flush-caches"* ]] || return 1
 }
 
-@test "shared file list repair reports a failed discovery scan" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (shared file list databases)"
-	fi
-	run env HOME="$TEST_HOME/shared-scan" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+@test "missing distro capabilities report unavailable outcomes" {
+	run env HOME="$TEST_HOME/unavailable" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-mkdir -p "$HOME/Library/Application Support/com.apple.sharedfilelist" "$HOME/bin"
-printf '#!/bin/bash\nexit 7\n' > "$HOME/bin/find"
-chmod +x "$HOME/bin/find"
-PATH="$HOME/bin:$PATH"
+PATH=/nonexistent
 
-execute_optimization shared_file_list_repair
-[[ "$(optimize_outcome_count failed)" == "1" ]] || exit 1
+execute_optimization ssd_trim
+execute_optimization dns_cache_flush
+[[ "$(optimize_outcome_count unavailable)" == "2" ]] || exit 1
 EOF
 
 	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Failed to scan shared file lists"* ]] || return 1
-	[[ "$output" != *"Failed to repair"* ]] || return 1
+	[[ "$output" == *"unavailable"* ]] || return 1
+
+}
+@test "orphan scan without findings reports an unchanged outcome" {
+	run env HOME="$TEST_HOME/orphans-clean" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+distro_orphans_list() { :; }
+distro_orphans_remove_plan() { echo "UNEXPECTED_PLAN"; }
+
+execute_optimization orphan_packages
+[[ "$(optimize_outcome_count unchanged)" == "1" ]] || exit 1
+EOF
+
+	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+	[[ "$output" == *"No orphaned packages found"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_PLAN"* ]] || return 1
+}
+
+@test "failed units report renders findings as attention" {
+	run env HOME="$TEST_HOME/units" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+mkdir -p "$HOME/bin"
+cat > "$HOME/bin/systemctl" <<'STUB'
+#!/bin/bash
+echo "nginx.service    loaded failed failed  A failed unit"
+echo "docker.service   loaded failed failed  Another failed unit"
+STUB
+chmod +x "$HOME/bin/systemctl"
+PATH="$HOME/bin:$PATH"
+
+execute_optimization failed_units_report
+[[ "$(optimize_outcome_count attention)" == "1" ]] || exit 1
+EOF
+
+	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+	[[ "$output" == *"Failed systemd units (2)"* ]] || return 1
+	[[ "$output" == *"Inspect with: systemctl --failed"* ]] || return 1
+}
+
+@test "dry-run plans report applied outcomes without executing" {
+	run env HOME="$TEST_HOME/dry-run" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+mkdir -p "$HOME/bin"
+printf '#!/bin/bash\necho UNEXPECTED_FSTRIM\n' > "$HOME/bin/fstrim"
+chmod +x "$HOME/bin/fstrim"
+PATH="$HOME/bin:$PATH"
+_linux_has_ssd_device() { return 0; }
+
+execute_optimization ssd_trim
+[[ "$(optimize_outcome_count applied)" == "1" ]] || exit 1
+EOF
+
+	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+	[[ "$output" == *"Would run: sudo fstrim -av"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_FSTRIM"* ]] || return 1
 }
 
 @test "optimize external probes use bounded execution" {
@@ -250,69 +139,14 @@ EOF
 set -euo pipefail
 tasks_file="$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-system_body=$(sed -n '/^opt_system_maintenance() {/,/^}/p' "$tasks_file")
-saved_body=$(sed -n '/^opt_saved_state_cleanup() {/,/^}/p' "$tasks_file")
-network_body=$(sed -n '/^opt_network_stack_optimize() {/,/^}/p' "$tasks_file")
-vpn_body=$(sed -n '/^has_active_vpn_interface() {/,/^}/p' "$tasks_file")
-shared_body=$(sed -n '/^opt_shared_file_list_repair() {/,/^}/p' "$tasks_file")
+plan_body=$(sed -n '/^_opt_linux_execute_plan() {/,/^}/p' "$tasks_file")
+units_body=$(sed -n '/^opt_failed_units_report() {/,/^}/p' "$tasks_file")
 
-[[ "$system_body" == *'run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" mdutil -s /'* ]] || exit 1
-[[ "$saved_body" == *'run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find'* ]] || exit 1
-[[ "$network_body" == *'run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" route -n get default'* ]] || exit 1
-[[ "$network_body" == *'run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" dscacheutil -q host'* ]] || exit 1
-[[ "$vpn_body" == *'run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" scutil --nc list'* ]] || exit 1
-[[ "$vpn_body" == *'run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" route -n get default'* ]] || exit 1
-[[ "$shared_body" == *'run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find'* ]] || exit 1
+[[ "$plan_body" == *'run_with_timeout "$MOLE_OPTIMIZE_LINUX_CMD_TIMEOUT"'* ]] || exit 1
+[[ "$units_body" == *'run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC"'* ]] || exit 1
 EOF
 
 	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-}
-
-@test "network probe timeout never authorizes maintenance" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (route/dscacheutil/scutil probes)"
-	fi
-	run env HOME="$TEST_HOME/network-timeout" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-
-run_with_timeout() { return 124; }
-sudo() { echo "UNEXPECTED_SUDO"; return 0; }
-
-execute_optimization network_stack_optimize
-[[ "$(optimize_outcome_count failed)" == "1" ]] || exit 1
-[[ "$(optimize_outcome_count applied)" == "0" ]] || exit 1
-EOF
-
-	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Network health check timed out"* ]] || return 1
-	[[ "$output" != *"Network routing table refreshed"* ]] || return 1
-	[[ "$output" != *"UNEXPECTED_SUDO"* ]] || return 1
-}
-
-@test "network probes preserve the caller errexit mode" {
-	if [[ "$(uname -s)" != "Darwin" ]]; then
-		skip "macOS-only flow (scutil VPN probes)"
-	fi
-	run env HOME="$TEST_HOME/vpn-errexit" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-
-run_with_timeout() { return 124; }
-sudo() { echo "UNEXPECTED_SUDO"; return 0; }
-set +e
-execute_optimization network_stack_optimize
-false
-echo "survived:$(optimize_outcome_count failed)"
-EOF
-
-	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Failed to inspect active VPN state"* ]] || return 1
-	[[ "$output" == *"survived:1"* ]] || return 1
-	[[ "$output" != *"Network routing table refreshed"* ]] || return 1
-	[[ "$output" != *"UNEXPECTED_SUDO"* ]] || return 1
 }
 
 @test "optimize tasks never toggle the caller errexit option" {

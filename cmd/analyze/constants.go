@@ -9,14 +9,12 @@ const (
 	// Below this many columns a scanned path is too clipped to tell anything
 	// apart, so it moves to its own row instead of sharing the status line.
 	scanPathInlineMinWidth = 24
-	spotlightMinFileSize   = 100 << 20
 	largeFileWarmupMinSize = 1 << 20
 	defaultViewport        = 12
 	analyzerCacheTTL       = 7 * 24 * time.Hour
 	overviewCacheTTL       = 7 * 24 * time.Hour
 	overviewCacheFile      = "overview_sizes.json"
 	duTimeout              = 30 * time.Second
-	mdlsTimeout            = 5 * time.Second
 	maxConcurrentOverview  = 8
 	batchUpdateSize        = 100
 	cacheModTimeGrace      = 30 * time.Minute
@@ -164,16 +162,11 @@ var foldDirs = map[string]bool{
 	".tmp":                    true,
 	"_temp":                   true,
 	"_tmp":                    true,
-	".Homebrew":               true,
 	".rustup":                 true,
 	".sdkman":                 true,
 	".nvm":                    true,
 
-	// macOS.
-	"Application Scripts":     true,
-	"Saved Application State": true,
-
-	// iCloud.
+	// Cloud placeholders.
 	"Mobile Documents": true,
 
 	// Containers.

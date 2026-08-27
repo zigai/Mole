@@ -230,18 +230,14 @@ type Collector struct {
 	lastBT   []BluetoothDevice
 
 	// Fast metrics (1s).
-	prevNet        map[string]net.IOCountersStat
-	lastNetAt      time.Time
-	rxHistoryBuf   *RingBuffer
-	txHistoryBuf   *RingBuffer
-	lastNetIPAt    time.Time
-	cachedNetIPs   map[string]string
-	lastGPUAt      time.Time
-	cachedGPU      []GPUStatus
-	lastGPUUsageAt time.Time
-	cachedGPUUsage float64
-	prevDiskIO     disk.IOCountersStat
-	lastDiskAt     time.Time
+	prevNet      map[string]net.IOCountersStat
+	lastNetAt    time.Time
+	rxHistoryBuf *RingBuffer
+	txHistoryBuf *RingBuffer
+	lastNetIPAt  time.Time
+	cachedNetIPs map[string]string
+	prevDiskIO   disk.IOCountersStat
+	lastDiskAt   time.Time
 
 	watchMu        sync.Mutex
 	processWatch   ProcessWatchConfig
@@ -363,8 +359,8 @@ func (c *Collector) collectFast(includeProcesses bool) (MetricsSnapshot, error) 
 
 	tasks := []func() error{
 		func() (err error) { collected.cpuStats, err = collectCPUFast(); return },
-		func() (err error) { collected.memStats, err = collectMemoryFast(); return },
-		func() (err error) { collected.diskStats, err = collectDisksFast(); return },
+		func() (err error) { collected.memStats, err = collectMemory(); return },
+		func() (err error) { collected.diskStats, err = collectDisks(); return },
 		func() (err error) { collected.diskIO = c.collectDiskIO(now); return nil },
 		func() (err error) { collected.netStats = c.collectNetwork(now); return nil },
 	}
@@ -389,7 +385,7 @@ func (c *Collector) collectFull() (MetricsSnapshot, error) {
 	var collected collectedMetrics
 
 	// Sample CPU first, before the concurrent collectors below spawn their
-	// subprocesses (system_profiler, df, ps, ...). The usage window is only
+	// subprocesses (df, ...). The usage window is only
 	// 100ms, so measuring while our own collection burst runs inflates the
 	// reading with Mole's own load (#1237).
 	var cpuErr error
@@ -561,10 +557,9 @@ func (e snapshotEnrichment) apply(snapshot *MetricsSnapshot, preserveLiveProcess
 	snapshot.CPU.ECoreCount = e.cpuECores
 	snapshot.Memory.Cached = e.memoryCached
 	snapshot.Memory.Pressure = e.memoryPressure
-	// Disk capacity is slow-changing and the corrections (APFS purgeable,
-	// diskutil, Finder) are expensive, so the fast path collects raw statfs
-	// values and we overwrite them with the last full-refresh corrected
-	// snapshot. DiskIO stays live. Skip when the cache is empty so the first
+	// Disk capacity is slow-changing, so the fast path collects raw statfs
+	// values and we overwrite them with the last full-refresh snapshot.
+	// DiskIO stays live. Skip when the cache is empty so the first
 	// fast paint still shows raw disks instead of a blank card.
 	if e.hasDisks && len(e.disks) > 0 {
 		snapshot.Disks = slices.Clone(e.disks)

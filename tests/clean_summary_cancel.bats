@@ -14,10 +14,10 @@ setup_file() {
     HOME="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-clean-summary-cancel.XXXXXX")"
     export HOME
 
-    mkdir -p "$HOME/Library/Caches"
+    mkdir -p "$HOME/.cache"
     mkdir -p "$HOME/.config/mole"
     for i in 1 2 3 4 5; do
-        mkdir -p "$HOME/Library/Caches/cachedir$i"
+        mkdir -p "$HOME/.cache/cachedir$i"
     done
 }
 
@@ -39,26 +39,18 @@ setup() {
 
 run_perform_cleanup_with() {
     export SECTION_RC="$1"
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=darwin \
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 # Stub every section so perform_cleanup never scans the real machine.
-# run_with_shell_timeout is stubbed too: its shell-fallback killer process
-# would otherwise outlive the test when pgrep is unavailable.
-for fn in clean_user_essentials clean_finder_metadata clean_app_caches \
-    clean_browsers run_cloud_and_office_cleanup clean_developer_tools \
-    clean_user_gui_applications clean_virtualization_tools \
-    clean_application_support_logs clean_orphaned_app_data \
-    clean_orphaned_system_services clean_orphaned_container_stubs \
-    show_user_launch_agent_hint_notice \
-    clean_apple_silicon_caches clean_cached_device_firmware \
-    clean_time_machine_failed_backups check_large_file_candidates \
-    show_project_artifact_hint_notice; do
+for fn in clean_linux_user_cache_sweep clean_linux_trash \
+    clean_linux_browser_caches clean_developer_tools \
+    clean_linux_aur_caches clean_linux_system_maintenance \
+    report_linux_orphan_packages; do
     eval "$fn() { return 0; }"
 done
-run_with_shell_timeout() { return 0; }
-clean_user_essentials() { return "$SECTION_RC"; }
+clean_linux_user_cache_sweep() { return "$SECTION_RC"; }
 perform_cleanup
 EOF
 }
@@ -89,24 +81,18 @@ EOF
 }
 
 @test "run with removal timeouts completes and reports them (#1384)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=darwin \
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 # Stub every section so perform_cleanup never scans the real machine.
-for fn in clean_user_essentials clean_finder_metadata clean_app_caches \
-    clean_browsers run_cloud_and_office_cleanup clean_developer_tools \
-    clean_user_gui_applications clean_virtualization_tools \
-    clean_application_support_logs clean_orphaned_app_data \
-    clean_orphaned_system_services clean_orphaned_container_stubs \
-    show_user_launch_agent_hint_notice \
-    clean_apple_silicon_caches clean_cached_device_firmware \
-    clean_time_machine_failed_backups check_large_file_candidates \
-    show_project_artifact_hint_notice; do
+for fn in clean_linux_user_cache_sweep clean_linux_trash \
+    clean_linux_browser_caches clean_developer_tools \
+    clean_linux_aur_caches clean_linux_system_maintenance \
+    report_linux_orphan_packages; do
     eval "$fn() { return 0; }"
 done
-run_with_shell_timeout() { return 0; }
-clean_user_essentials() { MOLE_CLEAN_REMOVAL_TIMEOUTS=3; return 0; }
+clean_linux_user_cache_sweep() { MOLE_CLEAN_REMOVAL_TIMEOUTS=3; return 0; }
 perform_cleanup
 EOF
 
@@ -117,31 +103,22 @@ EOF
 }
 
 @test "sizing timeouts still clean and the summary reports the under-count (#1374)" {
-    mkdir -p "$HOME/Library/Caches/cache1374"
-    printf x > "$HOME/Library/Caches/cache1374/file.bin"
+    mkdir -p "$HOME/.cache/cache1374"
+    printf x > "$HOME/.cache/cache1374/file.bin"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PLATFORM=darwin \
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc << 'EOF'
 source "$PROJECT_ROOT/bin/clean.sh"
 # Stub every section so perform_cleanup never scans the real machine.
-# run_with_shell_timeout is stubbed too: its shell-fallback killer process
-# would otherwise outlive the test when pgrep is unavailable.
-for fn in clean_finder_metadata clean_app_caches \
-    clean_browsers run_cloud_and_office_cleanup clean_developer_tools \
-    clean_user_gui_applications clean_virtualization_tools \
-    clean_application_support_logs clean_orphaned_app_data \
-    clean_orphaned_system_services clean_orphaned_container_stubs \
-    show_user_launch_agent_hint_notice \
-    clean_apple_silicon_caches clean_cached_device_firmware \
-    clean_time_machine_failed_backups check_large_file_candidates \
-    show_project_artifact_hint_notice; do
+for fn in clean_linux_trash clean_linux_browser_caches \
+    clean_developer_tools clean_linux_aur_caches \
+    clean_linux_system_maintenance report_linux_orphan_packages; do
     eval "$fn() { return 0; }"
 done
-run_with_shell_timeout() { return 0; }
 # Force every size check to hit the sizing budget.
 get_cleanup_path_size_kb() { return 124; }
-clean_user_essentials() {
-    safe_clean "$HOME/Library/Caches/cache1374" "User app cache"
+clean_linux_user_cache_sweep() {
+    safe_clean "$HOME/.cache/cache1374" "User app cache"
 }
 perform_cleanup
 EOF
@@ -154,5 +131,5 @@ EOF
     [[ "$output" != *"Cleanup cancelled"* ]] || return 1
     [[ "$output" == *"size-check budget"* ]] || return 1
     [[ "$output" == *"under-reported"* ]] || return 1
-    [[ ! -e "$HOME/Library/Caches/cache1374" ]]
+    [[ ! -e "$HOME/.cache/cache1374" ]]
 }

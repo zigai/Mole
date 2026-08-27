@@ -32,13 +32,9 @@ setup() {
     mkdir -p "$HOME"
 }
 
-# Log root differs per platform since the Linux port (XDG state dir).
+# Log root lives under the XDG state dir.
 _mole_test_log_root() {
-	if [[ "$(uname -s)" == "Darwin" ]]; then
-		printf '%s\n' "$(_mole_test_log_root)"
-	else
-		printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/mole"
-	fi
+	printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/mole"
 }
 
 @test "mo_spinner_chars returns default sequence" {
@@ -238,67 +234,6 @@ EOF
     [ "$result" = "protected" ]
 }
 
-@test "should_protect_path protects wallpaper and aerial assets" {
-    local path result
-    for path in \
-        "$HOME/Library/Application Support/com.apple.idleassetsd" \
-        "$HOME/Library/Application Support/com.apple.idleassetsd/Customer/video.mov" \
-        "/Library/Application Support/com.apple.idleassetsd/Customer/video.mov" \
-        "$HOME/Library/Application Support/com.apple.wallpaper/aerials/video.mov" \
-        "$HOME/Library/Application Support/com.apple.wallpaper/aerials/thumbnails/video.png"; do
-        result=$(HOME="$HOME" TARGET_PATH="$path" /bin/bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo protected || echo unprotected')
-        [ "$result" = "protected" ] || return 1
-    done
-
-    path="$HOME/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/rebuildable.bin"
-    result=$(HOME="$HOME" TARGET_PATH="$path" /bin/bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo protected || echo unprotected')
-    [ "$result" = "unprotected" ]
-}
-
-@test "xcode_build_tooling_process_state recognizes command-line build owners" {
-    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-pgrep() {
-    [[ "$1" == "-x" && "$2" == "xcodebuild" ]]
-}
-xcode_build_tooling_process_state
-EOF
-
-    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-}
-
-@test "xcode_build_tooling_process_state reports unknown on probe errors and missing pgrep" {
-    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-pgrep() { return 2; }
-process_state=0
-xcode_build_tooling_process_state || process_state=$?
-[[ "$process_state" -eq 2 ]] || exit 2
-unset -f pgrep
-PATH=/nonexistent
-process_state=0
-xcode_build_tooling_process_state || process_state=$?
-[[ "$process_state" -eq 2 ]] || exit 3
-EOF
-
-    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-}
-
-@test "xcode_build_tooling_process_state reports reliable no-match" {
-    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-pgrep() { return 1; }
-process_state=0
-xcode_build_tooling_process_state || process_state=$?
-[[ "$process_state" -eq 1 ]]
-EOF
-
-    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-}
-
 @test "rotate_log_once only checks log size once per session" {
     local log_file="$(_mole_test_log_root)/mole.log"
     mkdir -p "$(dirname "$log_file")"
@@ -455,44 +390,6 @@ EOF
     [[ "$output" == *"inactive=1 unknown=2"* ]]
 }
 
-@test "mole_darwin_user_cache_root validates trusted getconf output" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-
-resolver_mode=valid
-run_with_timeout() {
-    [[ "$2" == "/usr/bin/getconf" && "$3" == "DARWIN_USER_CACHE_DIR" ]] || return 3
-    case "$resolver_mode" in
-        valid) printf '/var/folders/example/C/\n' ;;
-        relative) printf 'tmp/cache\n' ;;
-        traversal) printf '/var/folders/../private\n' ;;
-        root) printf '/\n' ;;
-        timeout) return 124 ;;
-    esac
-}
-
-valid=$(mole_darwin_user_cache_root)
-relative_rc=0
-traversal_rc=0
-root_rc=0
-timeout_rc=0
-resolver_mode=relative
-mole_darwin_user_cache_root > /dev/null 2>&1 || relative_rc=$?
-resolver_mode=traversal
-mole_darwin_user_cache_root > /dev/null 2>&1 || traversal_rc=$?
-resolver_mode=root
-mole_darwin_user_cache_root > /dev/null 2>&1 || root_rc=$?
-resolver_mode=timeout
-mole_darwin_user_cache_root > /dev/null 2>&1 || timeout_rc=$?
-printf 'valid=%s relative=%s traversal=%s root=%s timeout=%s\n' \
-    "$valid" "$relative_rc" "$traversal_rc" "$root_rc" "$timeout_rc"
-EOF
-
-    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [[ "$output" == *"valid=/var/folders/example/C relative=1 traversal=1 root=1 timeout=124"* ]]
-}
-
 @test "mole_go_cache_root validates owner output and propagates timeout" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -574,21 +471,14 @@ EOF
     rm -f "$HOME/temp_file_path.txt" "$HOME/temp_dir_path.txt"
 }
 
-
-@test "should_protect_data protects system and critical apps" {
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.apple.Safari' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "protected" ]
-
+@test "should_protect_data protects proxy and system clients" {
     result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.clash.app' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
     result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'io.github.clash-verge-rev.clash-verge-rev' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.amnezia.awg' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "protected" ]
-
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.wireguard.macos' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'loginwindow' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
     result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.example.RegularApp' && echo 'protected' || echo 'not-protected'")
@@ -621,8 +511,6 @@ EOF
     [ "$result" = "protected" ]
 
     for codex_state_path in \
-        "$HOME/Library/Application Support/Codex/Cache/index" \
-        "$HOME/Library/Logs/com.openai.codex/codex.log" \
         "$HOME/.codex/sessions/2026/06/session.jsonl" \
         "$HOME/.codex/cache/session_index.jsonl" \
         "$HOME/.codex/cache/codex_app_directory/index.json" \
@@ -633,82 +521,23 @@ EOF
     done
 }
 
-@test "should_protect_data covers Raycast wildcard variants" {
-    for id in com.raycast.macos com.raycast.shared com.raycast.macos.BrowserExtension com.raycast-x.macos; do
-        result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data '$id' && echo 'protected' || echo 'not-protected'")
-        [ "$result" = "protected" ]
-    done
 
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.raycastfoo.bar' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "not-protected" ]
-}
-
-@test "should_protect_path protects NetworkExtension VPN preferences" {
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_path '/Volumes/Data/Library/Preferences/com.apple.networkextension.plist' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "protected" ]
-
-    local user_network_ext_pref="$HOME/Library/Preferences/com.apple.networkextension.necp.plist"
-    result=$(HOME="$HOME" TARGET_PATH="$user_network_ext_pref" /bin/bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo "protected" || echo "not-protected"')
-    [ "$result" = "protected" ]
-}
-
-@test "input methods are protected during cleanup but allowed for uninstall" {
+@test "input methods are protected during cleanup" {
     result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.tencent.inputmethod.QQInput' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
     result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.sogou.inputmethod.pinyin' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
-
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.tencent.inputmethod.QQInput' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "not-protected" ]
-
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.inputmethod.SCIM' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "protected" ]
 }
 
-@test "Karabiner-Elements is protected during cleanup but allowed for uninstall" {
-    # Keyboard config and preferences stay protected during clean
+@test "Karabiner-Elements keyboard config is protected during cleanup" {
     result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.pqrs.Karabiner-Elements.Settings' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
-
-    # But the app itself is a third-party app, not a system component, so it can be uninstalled
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'org.pqrs.Karabiner-Elements.Settings' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "not-protected" ]
-
-    # The main app bundle id (the actual `mo uninstall --list` key) behaves the same:
-    # removable from uninstall, still data-protected during clean.
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'org.pqrs.Karabiner-Elements' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "not-protected" ]
 
     result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.pqrs.Karabiner-Elements' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 }
 
-@test "Apple apps from App Store can be uninstalled (Issue #386)" {
-    # Xcode should NOT be protected from uninstall
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.dt.Xcode' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "not-protected" ]
-
-    # Final Cut Pro should NOT be protected from uninstall
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.FinalCutPro' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "not-protected" ]
-
-    # GarageBand should NOT be protected from uninstall
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.GarageBand' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "not-protected" ]
-
-    # iWork apps should NOT be protected from uninstall
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.iWork.Pages' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "not-protected" ]
-
-    # But Safari (system app) should still be protected
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.Safari' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "protected" ]
-
-    # And Finder should still be protected
-    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.finder' && echo 'protected' || echo 'not-protected'")
-    [ "$result" = "protected" ]
-}
 
 @test "print_summary_block formats output correctly" {
     result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; print_summary_block 'success' 'Test Summary' 'Detail 1' 'Detail 2'")
@@ -853,19 +682,6 @@ EOF
 
     run /bin/bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; printf 'g' | read_key"
     [ "$output" = "OTHER" ]
-}
-
-@test "read_key gg works on macOS default Bash 3.2 (fractional read -t rejected)" {
-    # macOS ships /bin/bash 3.2.57, which rejects fractional `read -t` timeouts.
-    # Exercise the shortcut under that exact interpreter when present so the
-    # portability regression is caught on macOS even if bats runs under bash 4+.
-    [[ -x /bin/bash ]] || skip "/bin/bash not available"
-    local major
-    major=$(/bin/bash -c 'echo "${BASH_VERSINFO[0]}"' 2> /dev/null || echo 99)
-    [[ "$major" -lt 4 ]] || skip "/bin/bash is not a 3.x build"
-
-    run /bin/bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; printf 'gg' | read_key"
-    [ "$output" = "TOP" ]
 }
 
 @test "read_key respects MOLE_READ_KEY_FORCE_CHAR" {

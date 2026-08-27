@@ -35,9 +35,8 @@ func main() {
 }
 
 // resolveScanTarget decides which scan a given invocation asks for. Kept
-// separate from main so the overview-vs-directory routing has a test that fails
-// when it flips: an end-to-end overview scan measures the real /Applications
-// and /Library, which cost 106s of a single CI test file's 134s.
+// separate from main so the overview-vs-directory routing has a test that
+// fails when it flips.
 func resolveScanTarget(envPath string, args []string) (string, bool, error) {
 	target := envPath
 	if target == "" && len(args) > 0 {
@@ -135,11 +134,8 @@ func createOverviewEntriesWithInsights(insightEntries []dirEntry) []dirEntry {
 	home := os.Getenv("HOME")
 	entries := []dirEntry{}
 
-	// Home first; platform-specific splits (e.g. macOS ~/Library) follow so
-	// their bytes are not double counted inside Home.
 	if home != "" {
 		entries = append(entries, dirEntry{Name: "Home", Path: home, IsDir: true, Size: -1})
-		entries = append(entries, homeSplitEntries(home)...)
 	}
 
 	entries = append(entries, systemOverviewRoots()...)

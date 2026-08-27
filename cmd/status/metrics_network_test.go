@@ -2,11 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	gopsutilnet "github.com/shirou/gopsutil/v4/net"
 	"strings"
 	"testing"
 	"time"
-
-	gopsutilnet "github.com/shirou/gopsutil/v4/net"
 )
 
 func TestCollectProxyFromEnvSupportsAllProxy(t *testing.T) {
@@ -23,43 +22,6 @@ func TestCollectProxyFromEnvSupportsAllProxy(t *testing.T) {
 	}
 	if got.Type != "SOCKS" {
 		t.Fatalf("expected SOCKS type, got %s", got.Type)
-	}
-	if got.Host != "127.0.0.1:7890" {
-		t.Fatalf("unexpected host: %s", got.Host)
-	}
-}
-
-func TestCollectProxyFromScutilOutputPAC(t *testing.T) {
-	out := `
-<dictionary> {
-  ProxyAutoConfigEnable : 1
-  ProxyAutoConfigURLString : http://127.0.0.1:6152/proxy.pac
-}`
-	got := collectProxyFromScutilOutput(out)
-	if !got.Enabled {
-		t.Fatalf("expected proxy enabled")
-	}
-	if got.Type != "PAC" {
-		t.Fatalf("expected PAC type, got %s", got.Type)
-	}
-	if got.Host != "127.0.0.1:6152" {
-		t.Fatalf("unexpected host: %s", got.Host)
-	}
-}
-
-func TestCollectProxyFromScutilOutputHTTPHostPort(t *testing.T) {
-	out := `
-<dictionary> {
-  HTTPEnable : 1
-  HTTPProxy : 127.0.0.1
-  HTTPPort : 7890
-}`
-	got := collectProxyFromScutilOutput(out)
-	if !got.Enabled {
-		t.Fatalf("expected proxy enabled")
-	}
-	if got.Type != "HTTP" {
-		t.Fatalf("expected HTTP type, got %s", got.Type)
 	}
 	if got.Host != "127.0.0.1:7890" {
 		t.Fatalf("unexpected host: %s", got.Host)
@@ -181,33 +143,6 @@ func TestCollectNetworkClampsCounterReset(t *testing.T) {
 	}
 	if got[0].RxRateMBs != 0 || got[0].TxRateMBs != 0 {
 		t.Fatalf("expected reset counters to clamp to zero, got %+v", got[0])
-	}
-}
-
-func TestTunnelInterfaceIsNotReportedAsAProxy(t *testing.T) {
-	// A machine with no configured proxy but an active utun (iCloud Private
-	// Relay, a corporate VPN, or a TUN-mode client) must not be told it has a
-	// proxy. The reading is still surfaced, just honestly labelled.
-	original := ioCountersFunc
-	ioCountersFunc = func(bool) ([]gopsutilnet.IOCountersStat, error) {
-		return []gopsutilnet.IOCountersStat{
-			{Name: "en0", BytesRecv: 100},
-			{Name: "utun4", BytesRecv: 20, BytesSent: 30},
-		}, nil
-	}
-	t.Cleanup(func() { ioCountersFunc = original })
-
-	got := collectProxyFromTunInterfaces()
-	if !got.Enabled || !got.IsTunnel || got.Type != "TUN" || got.Host != "utun4" {
-		t.Fatalf("unexpected tunnel status: %+v", got)
-	}
-	card := renderNetworkCard(
-		[]NetworkStatus{{Name: "en0", IP: "192.0.2.10"}},
-		NetworkHistory{}, got, 40,
-	)
-	rendered := strings.Join(card.lines, "\n")
-	if !strings.Contains(rendered, "Tunnel") || strings.Contains(rendered, "Proxy Tunnel") {
-		t.Fatalf("tunnel must be rendered without a proxy claim: %q", rendered)
 	}
 }
 

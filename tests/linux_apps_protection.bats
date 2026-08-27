@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# Linux safety additions (contract §4): critical path denies, protected
+# Linux safety (contract §4): critical path denies, protected
 # package denies, data-protected leftover ids, and the pacman-ownership guard
-# hook. Darwin tables stay empty behind the platform gate.
+# hook.
 
 setup_file() {
     PROJECT_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
@@ -152,24 +152,4 @@ EOF
     [[ "$output" == *"hook-hit"* ]]
     [[ "$output" == *"guarded-in-uninstall"* ]]
     [[ "$output" != *"UNGUARDED"* ]]
-}
-
-@test "darwin keeps the linux tables empty behind the gate" {
-    # Sourced standalone: common.sh re-detects the real platform, which on a
-    # Linux CI host would override the darwin simulation.
-    run /bin/bash <<EOF
-set -uo pipefail
-export HOME="$HOME"
-export MOLE_PLATFORM=darwin
-cd "$PROJECT_ROOT"
-source lib/core/app_protection_data.sh
-echo "packages=\${#SYSTEM_CRITICAL_PACKAGES[@]}"
-echo "ids=\${#DATA_PROTECTED_IDS[@]}"
-echo "syspaths=\${#LINUX_CRITICAL_SYSTEM_PATHS[@]}"
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"packages=0"* ]]
-    [[ "$output" == *"ids=0"* ]]
-    [[ "$output" == *"syspaths=0"* ]]
 }

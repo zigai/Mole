@@ -19,8 +19,8 @@
 #   - TOCTOU spirit: identity (package installed / app id listed / binary
 #     present) is re-verified immediately before the FIRST destructive side
 #     effect of each row.
-#   - No launchd/login-items/brew branches exist here: that teardown is macOS
-#     only and stays in the macOS path.
+#   - No launchd/login-items teardown exists here: non-package-owned system
+#     paths are never deleted manually.
 #   - Sudo is escalated once, only when a native package row (pacman/deb/rpm)
 #     needs it or a leftover outside $HOME would have to be removed;
 #     non-package-owned system paths are never deleted manually, so in

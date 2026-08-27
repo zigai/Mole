@@ -17,9 +17,9 @@ setup() {
     export HOME_DIR
     export MOLE_TEST_NO_AUTH=1
     # Immunity against cross-suite leakage: scripts/test.sh sources
-    # lib/core/file_ops.sh into its own shell, which exports MOLE_PLATFORM
-    # (and friends) into every bats worker. The prelude must re-detect
-    # from uname instead of trusting an inherited preset.
+    # lib/core files into its own shell, which exports MOLE_PLATFORM (and
+    # friends) into every bats worker. Drop the inherited preset so the
+    # library's own "linux" default applies.
     unset MOLE_PLATFORM MOLE_DISTRO_ID MOLE_OS_RELEASE_FILE MOLE_LOG_ROTATED || true
 }
 

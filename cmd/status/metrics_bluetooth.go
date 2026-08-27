@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -16,12 +15,6 @@ const (
 func (c *Collector) collectBluetooth(now time.Time) []BluetoothDevice {
 	if len(c.lastBT) > 0 && !c.lastBTAt.IsZero() && now.Sub(c.lastBTAt) < bluetoothCacheTTL {
 		return c.lastBT
-	}
-
-	if devs, err := readSystemProfilerBluetooth(); err == nil && len(devs) > 0 {
-		c.lastBTAt = now
-		c.lastBT = devs
-		return devs
 	}
 
 	if devs, err := readBluetoothCTLDevices(); err == nil && len(devs) > 0 {
@@ -37,21 +30,6 @@ func (c *Collector) collectBluetooth(now time.Time) []BluetoothDevice {
 	return c.lastBT
 }
 
-func readSystemProfilerBluetooth() ([]BluetoothDevice, error) {
-	if runtime.GOOS != "darwin" || !commandExists("system_profiler") {
-		return nil, errors.New("system_profiler unavailable")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), systemProfilerTimeout)
-	defer cancel()
-
-	out, err := runCmd(ctx, "system_profiler", "SPBluetoothDataType")
-	if err != nil {
-		return nil, err
-	}
-	return parseSPBluetooth(out), nil
-}
-
 func readBluetoothCTLDevices() ([]BluetoothDevice, error) {
 	if !commandExists("bluetoothctl") {
 		return nil, errors.New("bluetoothctl unavailable")
@@ -65,49 +43,6 @@ func readBluetoothCTLDevices() ([]BluetoothDevice, error) {
 		return nil, err
 	}
 	return parseBluetoothctl(out), nil
-}
-
-func parseSPBluetooth(raw string) []BluetoothDevice {
-	var devices []BluetoothDevice
-	var currentName string
-	var connected bool
-	var battery string
-
-	for line := range strings.Lines(raw) {
-		trim := strings.TrimSpace(line)
-		if len(trim) == 0 {
-			continue
-		}
-		if !strings.HasPrefix(line, "    ") && strings.HasSuffix(trim, ":") {
-			// Reset at top-level sections.
-			currentName = ""
-			connected = false
-			battery = ""
-			continue
-		}
-		if strings.HasPrefix(line, "        ") && strings.HasSuffix(trim, ":") {
-			if currentName != "" {
-				devices = append(devices, BluetoothDevice{Name: currentName, Connected: connected, Battery: battery})
-			}
-			currentName = strings.TrimSuffix(trim, ":")
-			connected = false
-			battery = ""
-			continue
-		}
-		if strings.Contains(trim, "Connected:") {
-			connected = strings.Contains(trim, "Yes")
-		}
-		if strings.Contains(trim, "Battery Level:") {
-			battery = strings.TrimSpace(strings.TrimPrefix(trim, "Battery Level:"))
-		}
-	}
-	if currentName != "" {
-		devices = append(devices, BluetoothDevice{Name: currentName, Connected: connected, Battery: battery})
-	}
-	if len(devices) == 0 {
-		return []BluetoothDevice{{Name: "No devices", Connected: false}}
-	}
-	return devices
 }
 
 func parseBluetoothctl(raw string) []BluetoothDevice {

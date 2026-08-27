@@ -12,25 +12,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/core/common.sh"
 
 source "$SCRIPT_DIR/../lib/core/sudo.sh"
-source "$SCRIPT_DIR/../lib/clean/brew.sh"
-source "$SCRIPT_DIR/../lib/clean/caches.sh"
-source "$SCRIPT_DIR/../lib/clean/apps.sh"
-source "$SCRIPT_DIR/../lib/clean/dev.sh"
-source "$SCRIPT_DIR/../lib/clean/app_caches.sh"
-source "$SCRIPT_DIR/../lib/clean/hints.sh"
-source "$SCRIPT_DIR/../lib/clean/system.sh"
-source "$SCRIPT_DIR/../lib/clean/user.sh"
 source "$SCRIPT_DIR/../lib/clean/linux_user.sh"
 source "$SCRIPT_DIR/../lib/clean/linux_system.sh"
+source "$SCRIPT_DIR/../lib/clean/caches.sh"
+source "$SCRIPT_DIR/../lib/clean/dev.sh"
 
 SYSTEM_CLEAN=false
 DRY_RUN=false
 if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
     DRY_RUN=true
 fi
-PROTECT_FINDER_METADATA=false
 EXTERNAL_VOLUME_TARGET=""
-IS_M_SERIES=$([[ "$(uname -m)" == "arm64" ]] && echo "true" || echo "false")
 
 # Whitelist and preview belong to the invoking user even when the whole
 # command runs as root. Root dry-runs stage preview content in a root-owned
@@ -114,15 +106,6 @@ publish_clean_preview_file() {
     return 0
 }
 
-if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
-    for entry in "${WHITELIST_PATTERNS[@]}"; do
-        if [[ "$entry" == "$FINDER_METADATA_SENTINEL" ]]; then
-            PROTECT_FINDER_METADATA=true
-            break
-        fi
-    done
-fi
-
 # Section tracking and summary counters.
 total_items=0
 TRACK_SECTION=0
@@ -130,13 +113,7 @@ SECTION_ACTIVITY=0
 files_cleaned=0
 total_size_cleaned=0
 whitelist_skipped_count=0
-PROJECT_ARTIFACT_HINT_DETECTED=false
-PROJECT_ARTIFACT_HINT_COUNT=0
-PROJECT_ARTIFACT_HINT_TRUNCATED=false
-PROJECT_ARTIFACT_HINT_EXAMPLES=()
-PROJECT_ARTIFACT_HINT_ESTIMATED_KB=0
-PROJECT_ARTIFACT_HINT_ESTIMATE_SAMPLES=0
-PROJECT_ARTIFACT_HINT_ESTIMATE_PARTIAL=false
+
 declare -a DRY_RUN_SEEN_IDENTITIES=()
 DRY_RUN_TOTAL_PARTIAL=false
 declare -a DEFERRED_CLEANUP_FAMILIES=()
@@ -264,9 +241,6 @@ record_dry_run_cleanup_target() {
         return 1
     fi
     if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$path" 2> /dev/null; then
-        return 1
-    fi
-    if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$path" 2> /dev/null; then
         return 1
     fi
     # Keep preview eligibility identical to real cleanup (#1390 / PR #1391).
@@ -749,11 +723,7 @@ get_cleanup_path_size_kb() {
     # with a zero/invalid stat we also fall back; a symlink reports 0 directly.
     if [[ -L "$path" || -f "$path" ]] && command -v stat > /dev/null 2>&1; then
         local bytes
-        if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
-            bytes=$(stat -c%s "$path" 2> /dev/null || echo "0")
-        else
-            bytes=$(stat "${_MOLE_STAT_SIZE_FLAG}" "$path" 2> /dev/null || echo "0")
-        fi
+        bytes=$(stat -c%s "$path" 2> /dev/null || echo "0")
         if [[ "$bytes" =~ ^[0-9]+$ && "$bytes" -gt 0 ]]; then
             echo $(((bytes + 1023) / 1024))
             return 0
@@ -908,13 +878,6 @@ _safe_clean_impl() {
             skip=true
             skipped_count=$((skipped_count + 1))
             log_operation "clean" "SKIPPED" "$path" "whitelist"
-        fi
-        [[ "$skip" == "true" ]] && continue
-
-        if holds_compiled_model_cache "$path"; then
-            skip=true
-            skipped_count=$((skipped_count + 1))
-            log_operation "clean" "SKIPPED" "$path" "compiled model cache"
         fi
         [[ "$skip" == "true" ]] && continue
 
@@ -1459,11 +1422,7 @@ start_cleanup() {
         return 0
     fi
 
-    if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
-        echo -e "${PURPLE_BOLD}Clean Your Linux${NC}"
-    else
-        echo -e "${PURPLE_BOLD}Clean Your Mac${NC}"
-    fi
+    echo -e "${PURPLE_BOLD}Clean Your Linux${NC}"
     echo ""
 
     if [[ "$DRY_RUN" != "true" && -t 0 ]]; then
@@ -1517,7 +1476,8 @@ start_cleanup() {
 }
 
 # Ordered cleanup sections for Linux. Wired through the same section,
-# spinner, dry-run ledger, and cancellation primitives as the macOS flow.
+# spinner, dry-run ledger, and cancellation primitives as the rest of this
+# script.
 run_linux_clean_sections() {
     # ===== 1. User essentials =====
     start_section "User essentials"
@@ -1614,11 +1574,6 @@ perform_cleanup() {
         return 0
     fi
 
-    # Pre-check TCC permissions to avoid mid-run prompts.
-    if [[ -z "$EXTERNAL_VOLUME_TARGET" ]]; then
-        check_tcc_permissions
-    fi
-
     if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
         local predefined_count=0
         local custom_count=0
@@ -1654,20 +1609,9 @@ perform_cleanup() {
 
             if [[ "$DRY_RUN" == "true" ]]; then
                 for pattern in "${WHITELIST_PATTERNS[@]}"; do
-                    [[ "$pattern" == "$FINDER_METADATA_SENTINEL" ]] && continue
                     echo -e "  ${GRAY}${ICON_SUBLIST}${NC} ${GRAY}${pattern}${NC}"
                 done
             fi
-        fi
-    fi
-
-    if [[ -t 1 && "$DRY_RUN" != "true" && "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
-        local fda_status=0
-        has_full_disk_access
-        fda_status=$?
-        if [[ $fda_status -eq 1 ]]; then
-            echo ""
-            echo -e "${GRAY}${ICON_REVIEW}${NC} ${GRAY}Grant Full Disk Access to your terminal in System Settings for best results${NC}"
         fi
     fi
 
@@ -1712,21 +1656,7 @@ perform_cleanup() {
             _run_cleanup_step clean_external_volume_target "$EXTERNAL_VOLUME_TARGET" || return $?
             end_section
         else
-            # Linux has its own ordered section list; the macOS sequence
-            # below stays untouched.
-            if [[ "${MOLE_PLATFORM:-darwin}" == "linux" ]]; then
-                run_linux_clean_sections || return $?
-                return 0
-            fi
-
-            # ===== 1. System =====
-            if [[ "$SYSTEM_CLEAN" == "true" ]]; then
-                start_section "System"
-                _run_cleanup_step clean_deep_system || return $?
-                _run_cleanup_step clean_local_snapshots || return $?
-                end_section
-            fi
-
+            # Linux has its own ordered section list.
             if [[ ${#WHITELIST_WARNINGS[@]} -gt 0 ]]; then
                 flush_idle_section_slot
                 echo ""
@@ -1735,100 +1665,7 @@ perform_cleanup() {
                 done
             fi
 
-            # ===== 2. User essentials =====
-            start_section "User essentials"
-            _run_cleanup_step clean_user_essentials || return $?
-            _run_cleanup_step clean_finder_metadata || return $?
-            end_section
-
-            # ===== 3. App caches (merged sandboxed and standard app caches) =====
-            start_section "App caches"
-            _run_cleanup_step clean_app_caches || return $?
-            end_section
-
-            # ===== 4. Browsers =====
-            start_section "Browsers"
-            _run_cleanup_step clean_browsers || return $?
-            end_section
-
-            # ===== 5. Cloud & Office =====
-            start_section "Cloud & Office"
-            # Force shell fallback so timeout runs in this shell context.
-            # The Cloud/Office cleaners rely on helpers (safe_clean, whitelist checks)
-            # defined in this script and sourced modules.
-            if run_with_shell_timeout 300 run_cloud_and_office_cleanup; then
-                : # completed successfully
-            else
-                local ret=$?
-                if [[ $ret -eq 124 ]]; then
-                    log_warning "Cloud & Office cleanup timed out after 5 minutes, skipping remaining items"
-                elif [[ $ret -ge 128 ]]; then
-                    return "$ret"
-                else
-                    log_warning "Cloud & Office cleanup failed with exit code $ret"
-                fi
-            fi
-            end_section
-
-            # ===== 6. Developer tools (merged CLI and GUI tooling) =====
-            start_section "Developer tools"
-            _run_cleanup_step clean_developer_tools || return $?
-            end_section
-
-            # ===== 7. Apps & utilities =====
-            start_section "Apps & utilities"
-            _run_cleanup_step clean_user_gui_applications || return $?
-            end_section
-
-            # ===== 8. Virtualization =====
-            start_section "Virtualization"
-            _run_cleanup_step clean_virtualization_tools || return $?
-            end_section
-
-            # ===== 9. Application Support =====
-            start_section "Application Support"
-            _run_cleanup_step clean_application_support_logs || return $?
-            end_section
-
-            # ===== 10. App leftovers =====
-            start_section "App leftovers"
-            _run_cleanup_step clean_orphaned_app_data || return $?
-            _run_cleanup_step clean_orphaned_system_services || return $?
-            # No stale-LaunchServices step here on purpose. `lsregister -u`
-            # cannot remove a record whose app is already gone: on macOS 15 and
-            # later it fails with -10814 for every such path, which is exactly
-            # the set this would have targeted, so the step could only ever
-            # report failures. `mo optimize` already offers the supported
-            # repair (`lsregister -gc` plus a domain rescan) as an explicit,
-            # user-triggered task.
-            _run_cleanup_step clean_orphaned_container_stubs || return $?
-            _run_cleanup_step show_user_launch_agent_hint_notice || return $?
-            end_section
-
-            # ===== 11. Apple Silicon =====
-            _run_cleanup_step clean_apple_silicon_caches || return $?
-
-            # ===== 12. Device backups & firmware =====
-            # iOS backups are reported once, in the Large files section; a second
-            # row here used a different size formatter and confused users.
-            start_section "Device backups & firmware"
-            _run_cleanup_step clean_cached_device_firmware || return $?
-            end_section
-
-            # ===== 13. Time Machine =====
-            start_section "Time Machine"
-            _run_cleanup_step clean_time_machine_failed_backups || return $?
-            end_section
-
-            # ===== 14. Large files =====
-            start_section "Large files"
-            _run_cleanup_step check_large_file_candidates || return $?
-            end_section
-
-            # ===== 15. Project artifacts =====
-            start_section "Project artifacts"
-            _run_cleanup_step show_project_artifact_hint_notice || return $?
-            end_section
+            run_linux_clean_sections || return $?
         fi
     }
     run_clean_sections || cleanup_cancel_rc=$?
@@ -2012,20 +1849,6 @@ perform_cleanup() {
     printf '\n'
 
     return "$cleanup_cancel_rc"
-}
-
-run_with_shell_timeout() {
-    local duration="$1"
-    shift || true
-    # Functions (for example safe_clean) are available only in the current shell.
-    # Force the shell fallback path so timeout can execute shell functions directly.
-    MO_TIMEOUT_BIN="" MO_TIMEOUT_PERL_BIN="" run_with_timeout "$duration" "$@"
-}
-
-# shellcheck disable=SC2329  # Invoked indirectly via run_with_timeout fallback.
-run_cloud_and_office_cleanup() {
-    clean_cloud_storage
-    clean_office_applications
 }
 
 main() {

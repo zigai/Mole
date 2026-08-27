@@ -1,18 +1,13 @@
-//go:build linux
-
 package main
 
 import (
-	"container/heap"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -20,28 +15,17 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Linux counterpart of paths_darwin.go. Every platform-varying analyze hook is
-// defined in both files with the same signature; the shared code in this
-// package only calls through these symbols.
-
 // lastAccessTimeFromStat reads st_atim (Linux stat layout).
 func lastAccessTimeFromStat(stat *syscall.Stat_t) time.Time {
 	return time.Unix(stat.Atim.Sec, stat.Atim.Nsec)
 }
+
 func systemOverviewRoots() []dirEntry {
 	return []dirEntry{
 		{Name: "System Data", Path: "/var", IsDir: true, Size: -1},
 		{Name: "Optional Software", Path: "/opt", IsDir: true, Size: -1},
 	}
 }
-
-// homeSplitEntries: Linux homes have no ~/Library-style app data split, so
-// Home is scanned as one row.
-func homeSplitEntries(home string) []dirEntry { return nil }
-
-func homeLibraryDirName() string { return "" }
-
-func homeLibraryPath(home string) string { return "" }
 
 var moCleanHandledPathFragments = []string{
 	"/.cache/",
@@ -92,72 +76,6 @@ func appendInsightEntries(entries []dirEntry, home string) []dirEntry {
 	}
 
 	return entries
-}
-
-// findLargeFilesExtra discovers large files by walking the tree directly;
-// Linux has no Spotlight equivalent to lean on.
-func findLargeFilesExtra(ctx context.Context, root string, minSize int64) ([]fileEntry, error) {
-	if err := validatePath(root); err != nil {
-		return nil, nil
-	}
-	if minSize < 0 || minSize > 1<<50 { // 1 PB max
-		return nil, nil
-	}
-
-	h := &largeFileHeap{}
-	walkCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if walkCtx.Err() != nil {
-			return fs.SkipAll
-		}
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if path != root && isInFoldedDir(path) {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil
-		}
-		if shouldSkipFileForLargeTracking(path) || isInFoldedDir(path) {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		actualSize := getActualFileSize(path, info)
-		if actualSize < minSize {
-			return nil
-		}
-		candidate := fileEntry{
-			Name: filepath.Base(path),
-			Path: path,
-			Size: actualSize,
-		}
-		if h.Len() < maxLargeFiles {
-			heap.Push(h, candidate)
-		} else if candidate.Size > (*h)[0].Size {
-			heap.Pop(h)
-			heap.Push(h, candidate)
-		}
-		return nil
-	})
-
-	files := make([]fileEntry, h.Len())
-	for i := range slices.Backward(files) {
-		files[i] = heap.Pop(h).(fileEntry)
-	}
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return files, nil
 }
 
 // duIgnoreArgs renders ignore names with GNU du's --exclude option, which

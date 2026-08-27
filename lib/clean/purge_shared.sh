@@ -14,8 +14,7 @@ if [[ -d "$HOME" ]]; then
 fi
 readonly MOLE_PURGE_PHYSICAL_HOME
 
-# Canonical purge targets (heavy project build artifacts). macOS-specific
-# entries join only on darwin so Linux purge discovery never matches them.
+# Canonical purge targets (heavy project build artifacts).
 MOLE_PURGE_TARGETS=(
     "node_modules"
     "target"            # Rust, Maven
@@ -27,7 +26,6 @@ MOLE_PURGE_TARGETS=(
     ".mypy_cache"       # Python (mypy)
     ".tox"              # Python (tox virtualenvs)
     ".nox"              # Python (nox virtualenvs)
-    ".ruff_cache"       # Python (ruff)
     ".gradle"           # Gradle local
     ".terragrunt-cache" # Terragrunt downloaded modules/providers
     "__pycache__"       # Python
@@ -50,16 +48,8 @@ MOLE_PURGE_TARGETS=(
     ".expo"             # Expo
     ".build"            # Swift Package Manager
 )
-if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
-    MOLE_PURGE_TARGETS+=(
-        "DerivedData"   # Xcode
-        "Pods"          # CocoaPods
-    )
-fi
 readonly MOLE_PURGE_TARGETS
 
-# macOS cloud-provider roots join only on darwin; the directory does not
-# exist as a sync container on Linux.
 MOLE_PURGE_DEFAULT_SEARCH_PATHS=(
     "$HOME/www"
     "$HOME/dev"
@@ -78,9 +68,6 @@ MOLE_PURGE_DEFAULT_SEARCH_PATHS=(
     "$HOME/.codex/worktrees"
     "$HOME/.claude/worktrees"
 )
-if [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]]; then
-    MOLE_PURGE_DEFAULT_SEARCH_PATHS+=("$HOME/Library/CloudStorage")
-fi
 readonly MOLE_PURGE_DEFAULT_SEARCH_PATHS
 
 readonly MOLE_PURGE_MONOREPO_INDICATORS=(
@@ -116,30 +103,6 @@ readonly MOLE_PURGE_PROJECT_INDICATORS=(
 readonly MOLE_CACHEDIR_TAG_NAME="CACHEDIR.TAG"
 readonly MOLE_CACHEDIR_TAG_SIGNATURE="Signature: 8a477f597d28d172789f06886806bc55"
 
-# High-noise targets intentionally excluded from quick hint scans in mo clean.
-readonly MOLE_PURGE_QUICK_HINT_EXCLUDED_TARGETS=(
-    "bin"
-    "vendor"
-)
-
-mole_purge_is_cloud_synced_path() {
-    local path="${1:-}"
-    [[ -n "$path" ]] || return 1
-
-    # CloudStorage / Mobile Documents are macOS sync containers only.
-    [[ "${MOLE_PLATFORM:-darwin}" == "darwin" ]] || return 1
-
-
-    case "$path" in
-        "$HOME/Library/CloudStorage" | "$HOME/Library/CloudStorage/"* | "$HOME/Library/Mobile Documents" | "$HOME/Library/Mobile Documents/"* | \
-            "$MOLE_PURGE_PHYSICAL_HOME/Library/CloudStorage" | "$MOLE_PURGE_PHYSICAL_HOME/Library/CloudStorage/"* | "$MOLE_PURGE_PHYSICAL_HOME/Library/Mobile Documents" | "$MOLE_PURGE_PHYSICAL_HOME/Library/Mobile Documents/"*)
-            return 0
-            ;;
-    esac
-
-    return 1
-}
-
 mole_purge_is_project_root() {
     local dir="$1"
     local indicator
@@ -169,36 +132,12 @@ mole_dir_has_cachedir_tag() {
     [[ "$signature" == "$MOLE_CACHEDIR_TAG_SIGNATURE" ]]
 }
 
-mole_purge_quick_hint_target_names() {
-    local target
-    local excluded
-    local is_excluded
-
-    for target in "${MOLE_PURGE_TARGETS[@]}"; do
-        is_excluded=false
-        for excluded in "${MOLE_PURGE_QUICK_HINT_EXCLUDED_TARGETS[@]}"; do
-            if [[ "$target" == "$excluded" ]]; then
-                is_excluded=true
-                break
-            fi
-        done
-        [[ "$is_excluded" == "true" ]] && continue
-        printf '%s\n' "$target"
-    done
-}
-
 # Resolve a directory path to its canonical filesystem casing.
-# On case-insensitive macOS (APFS), ~/Code and ~/code point to the same
-# directory but with different display names.  This function returns the
-# real (on-disk) path so that string comparisons work correctly for dedup.
-#
 # Uses the external /bin/pwd rather than the bash builtin: bash's `pwd -P`
 # resolves symlink chains in $PWD but reuses the casing of the `cd`
-# argument instead of querying the filesystem, so on case-insensitive APFS
-# it returns ~/Workspace even when the on-disk directory is ~/workspace.
-# That breaks the string dedup in discover_project_dirs and a project
-# appears twice (#1416). /bin/pwd calls getcwd(3), which returns the real
-# on-disk name.
+# argument instead of querying the filesystem. That breaks the string dedup
+# in discover_project_dirs and a project appears twice (#1416). /bin/pwd
+# calls getcwd(3), which returns the real on-disk name.
 mole_purge_resolve_path_case() {
     local path="$1"
     if [[ -d "$path" ]]; then

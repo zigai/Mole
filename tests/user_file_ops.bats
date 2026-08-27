@@ -33,13 +33,8 @@ setup() {
     mkdir -p "$HOME"
 }
 
-# stat ownership flags differ per platform (BSD -f vs GNU -c).
 _mole_test_stat_uid() {
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        /usr/bin/stat -f%u "$1"
-    else
-        /usr/bin/stat -c%u "$1"
-    fi
+    stat -c%u "$1"
 }
 
 @test "is_root_user detects non-root correctly" {

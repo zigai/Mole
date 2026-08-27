@@ -234,3 +234,181 @@ clean_linux_aur_caches() {
     [[ ${#targets[@]} -gt 0 ]] || return 0
     safe_clean "${targets[@]}" "AUR helper cache"
 }
+
+resolve_existing_path() {
+    local path="$1"
+    [[ -e "$path" ]] || return 1
+
+    if command -v realpath > /dev/null 2>&1; then
+        realpath "$path" 2> /dev/null && return 0
+    fi
+
+    local dir base
+    dir=$(cd -P "$(dirname "$path")" 2> /dev/null && pwd) || return 1
+    base=$(basename "$path")
+    printf '%s/%s\n' "$dir" "$base"
+}
+
+external_volume_root() {
+    printf '%s\n' "${MOLE_EXTERNAL_VOLUMES_ROOT:-/Volumes}"
+}
+
+validate_external_volume_target() {
+    local target="$1"
+    local root
+    root=$(external_volume_root)
+    local resolved_root="$root"
+    if [[ -e "$root" ]]; then
+        resolved_root=$(resolve_existing_path "$root" 2> /dev/null || printf '%s\n' "$root")
+    fi
+    resolved_root="${resolved_root%/}"
+
+    if [[ -z "$target" ]]; then
+        echo "Missing external volume path" >&2
+        return 1
+    fi
+    if [[ "$target" != /* ]]; then
+        echo "External volume path must be absolute: $target" >&2
+        return 1
+    fi
+    if [[ "$target" == "$root" || "$target" == "$resolved_root" ]]; then
+        echo "Refusing to clean the volumes root directly: $resolved_root" >&2
+        return 1
+    fi
+    if [[ -L "$target" ]]; then
+        echo "Refusing to clean symlinked volume path: $target" >&2
+        return 1
+    fi
+
+    local resolved
+    resolved=$(resolve_existing_path "$target") || {
+        echo "External volume path does not exist: $target" >&2
+        return 1
+    }
+
+    if [[ "$resolved" != "$resolved_root/"* ]]; then
+        echo "External volume path must be under $resolved_root: $resolved" >&2
+        return 1
+    fi
+
+    local relative_path="${resolved#"$resolved_root"/}"
+    if [[ -z "$relative_path" || "$relative_path" == "$resolved" || "$relative_path" == */* ]]; then
+        echo "External cleanup only supports mounted paths directly under $resolved_root: $resolved" >&2
+        return 1
+    fi
+
+    local disk_info=""
+    disk_info=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" command diskutil info "$resolved" 2> /dev/null || echo "")
+    if [[ -n "$disk_info" ]]; then
+        if echo "$disk_info" | grep -Eq 'Internal:[[:space:]]+Yes'; then
+            echo "Refusing to clean an internal volume: $resolved" >&2
+            return 1
+        fi
+
+        local protocol=""
+        protocol=$(echo "$disk_info" | awk -F: '/Protocol:/ {gsub(/^[[:space:]]+/, "", $2); print $2; exit}')
+        case "$protocol" in
+            SMB | NFS | AFP | CIFS | WebDAV)
+                echo "Refusing to clean network volume protocol $protocol: $resolved" >&2
+                return 1
+                ;;
+        esac
+    fi
+
+    printf '%s\n' "$resolved"
+}
+
+clean_external_volume_target() {
+    local volume="$1"
+    [[ -d "$volume" ]] || return 1
+    [[ -L "$volume" ]] && return 1
+
+    local -a top_level_targets=(
+        "$volume/.TemporaryItems"
+        "$volume/.Trashes"
+    )
+    local cleaned_count=0
+    local total_size=0
+    local found_any=false
+    local volume_name="${volume##*/}"
+
+    start_section_spinner "Scanning external volume..."
+
+    local target_path
+    for target_path in "${top_level_targets[@]}"; do
+        [[ -e "$target_path" ]] || continue
+        [[ -L "$target_path" ]] && continue
+        if should_protect_path "$target_path" 2> /dev/null || is_path_whitelisted "$target_path" 2> /dev/null; then
+            continue
+        fi
+
+        local size_kb=""
+        local size_rc=0
+        size_kb=$(get_path_size_kb "$target_path" 2> /dev/null) || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
+        [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+
+        if [[ "$DRY_RUN" == "true" ]]; then
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$target_path" "$size_kb" 1 true || continue
+            fi
+            found_any=true
+            cleaned_count=$((cleaned_count + 1))
+            total_size=$((total_size + size_kb))
+        elif safe_remove "$target_path" true > /dev/null 2>&1; then
+            found_any=true
+            cleaned_count=$((cleaned_count + 1))
+            total_size=$((total_size + size_kb))
+        fi
+    done
+
+    local metadata_scan_timeout="${MOLE_EXTERNAL_VOLUME_SCAN_TIMEOUT:-15}"
+    [[ "$metadata_scan_timeout" =~ ^[0-9]+$ ]] || metadata_scan_timeout=15
+    while IFS= read -r -d '' metadata_file; do
+        [[ -e "$metadata_file" ]] || continue
+        if should_protect_path "$metadata_file" 2> /dev/null || is_path_whitelisted "$metadata_file" 2> /dev/null; then
+            continue
+        fi
+
+        local size_kb=""
+        local size_rc=0
+        size_kb=$(get_path_size_kb "$metadata_file" 2> /dev/null) || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
+        [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+
+        if [[ "$DRY_RUN" == "true" ]]; then
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$metadata_file" "$size_kb" 1 true || continue
+            fi
+            found_any=true
+            cleaned_count=$((cleaned_count + 1))
+            total_size=$((total_size + size_kb))
+        elif safe_remove "$metadata_file" true > /dev/null 2>&1; then
+            found_any=true
+            cleaned_count=$((cleaned_count + 1))
+            total_size=$((total_size + size_kb))
+        fi
+    done < <(run_with_timeout "$metadata_scan_timeout" find -P "$volume" -xdev -type f -name "._*" -print0 2> /dev/null || true)
+
+    stop_section_spinner
+
+    if [[ "$found_any" == "true" ]]; then
+        local size_human
+        size_human=$(bytes_to_human "$((total_size * 1024))")
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} External volume cleanup${NC} · ${YELLOW}${volume_name}, $(colorize_human_size "$size_human") ${YELLOW}dry${NC}"
+        else
+            local line_color
+            line_color=$(cleanup_result_color_kb "$total_size")
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} External volume cleanup${NC} · ${line_color}${volume_name}, $size_human${NC}"
+        fi
+        files_cleaned=$((files_cleaned + cleaned_count))
+        total_size_cleaned=$((total_size_cleaned + total_size))
+        total_items=$((total_items + 1))
+        note_activity
+    fi
+
+    return 0
+}

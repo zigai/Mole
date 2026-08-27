@@ -24,8 +24,8 @@ else
     _MOLE_PLATFORM_DIR="$PWD"
 fi
 
-# Resolve the operating system into MOLE_PLATFORM ("darwin" or "linux") and
-# load the matching platform module. Anything else is refused loudly.
+# Resolve this host into MOLE_PLATFORM="linux" and load the Linux platform
+# module. Anything else is refused loudly.
 mole_detect_platform() {
     # Honor an explicitly pinned MOLE_PLATFORM (test seam); detect otherwise.
     local kernel="${MOLE_PLATFORM:-}"
@@ -33,11 +33,6 @@ mole_detect_platform() {
         kernel="$(uname -s)"
     fi
     case "$kernel" in
-        Darwin|darwin)
-            export MOLE_PLATFORM="darwin"
-            # shellcheck source=platform/darwin.sh
-            source "$_MOLE_PLATFORM_DIR/darwin.sh"
-            ;;
         Linux|linux)
             export MOLE_PLATFORM="linux"
             # shellcheck source=platform/linux/common.sh
@@ -112,8 +107,7 @@ mole_detect_distro() {
     fi
 }
 
-# Shared roots; identical on darwin and linux. XDG variables are honored on
-# both platforms (they are simply usually unset on macOS).
+# Shared roots. XDG variables are honored.
 mole_cache_dir() {
     printf '%s\n' "${XDG_CACHE_HOME:-$HOME/.cache}/mole"
 }

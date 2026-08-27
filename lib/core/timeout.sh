@@ -14,52 +14,26 @@ readonly MOLE_TIMEOUT_LOADED=1
 # Timeout Command Initialization
 # ============================================================================
 
-# Initialize timeout command (prefer gtimeout from coreutils, fallback to timeout)
-# Sets MO_TIMEOUT_BIN to the available timeout command
-#
-# Recommendation: Install coreutils for reliable timeout support
-#   brew install coreutils
-#
-# Fallback order:
-#   1. gtimeout / timeout
-#   2. perl helper with dedicated process group cleanup
-#   3. shell-based fallback (last resort)
-#
-# The shell-based fallback has known limitations:
-#   - May not clean up all child processes
-#   - Has race conditions in edge cases
-#   - Less reliable than native timeout/perl helper
+# Initialize the timeout command (GNU coreutils).
+# Sets MO_TIMEOUT_BIN to the resolved timeout binary.
 if [[ -z "${MO_TIMEOUT_INITIALIZED:-}" ]]; then
     MO_TIMEOUT_BIN=""
-    MO_TIMEOUT_PERL_BIN=""
-    for candidate in gtimeout timeout; do
-        if command -v "$candidate" > /dev/null 2>&1; then
-            MO_TIMEOUT_BIN="$(command -v "$candidate")"
-            if [[ "${MO_DEBUG:-0}" == "1" ]]; then
-                echo "[TIMEOUT] Using command: $MO_TIMEOUT_BIN" >&2
-            fi
-            break
-        fi
-    done
-
-    if command -v perl > /dev/null 2>&1; then
-        MO_TIMEOUT_PERL_BIN="$(command -v perl)"
-        if [[ -z "$MO_TIMEOUT_BIN" ]] && [[ "${MO_DEBUG:-0}" == "1" ]]; then
-            echo "[TIMEOUT] Using perl fallback: $MO_TIMEOUT_PERL_BIN" >&2
+    if command -v timeout > /dev/null 2>&1; then
+        MO_TIMEOUT_BIN="$(command -v timeout)"
+        if [[ "${MO_DEBUG:-0}" == "1" ]]; then
+            echo "[TIMEOUT] Using command: $MO_TIMEOUT_BIN" >&2
         fi
     fi
 
     # Log warning if no timeout command available
-    if [[ -z "$MO_TIMEOUT_BIN" && -z "$MO_TIMEOUT_PERL_BIN" ]] && [[ "${MO_DEBUG:-0}" == "1" ]]; then
+    if [[ -z "$MO_TIMEOUT_BIN" ]] && [[ "${MO_DEBUG:-0}" == "1" ]]; then
         echo "[TIMEOUT] No timeout command found, using shell fallback" >&2
-        echo "[TIMEOUT] Install coreutils for better reliability: brew install coreutils" >&2
     fi
 
     # Export so child processes inherit detected values and skip re-detection.
     # Without this, children that inherit MO_TIMEOUT_INITIALIZED=1 skip the init
     # block but have empty bin vars, forcing the slow shell fallback.
     export MO_TIMEOUT_BIN
-    export MO_TIMEOUT_PERL_BIN
     export MO_TIMEOUT_INITIALIZED=1
 fi
 
@@ -89,43 +63,34 @@ _mole_cleanup_timeout_killer() {
     wait "$killer_pid" 2> /dev/null || true
 }
 
-# Return success when Mole's process group still owns the controlling terminal.
-# Checking this before a prompt avoids SIGTTIN if a nested interactive command
-# returned the tty to Mole's parent shell instead of restoring it to Mole.
 mole_tty_is_foreground() {
     # Non-terminal input cannot trigger SIGTTIN; preserve scripted/test flows.
     [[ -t 0 ]] || return 0
 
-    local perl_bin="${MO_TIMEOUT_PERL_BIN:-}"
-    if [[ -z "$perl_bin" || ! -x "$perl_bin" ]]; then
-        perl_bin=$(command -v perl 2> /dev/null || true)
-    fi
-    [[ -n "$perl_bin" && -x "$perl_bin" ]] || return 0
-
-    # shellcheck disable=SC2016 # Embedded Perl variables are intentionally single-quoted.
-    "$perl_bin" -MPOSIX=tcgetpgrp -e '
-        my $foreground_pgrp = tcgetpgrp(fileno(STDIN));
-        my $current_pgrp = getpgrp();
-        exit((defined($foreground_pgrp) && $foreground_pgrp >= 0 &&
-            $foreground_pgrp == $current_pgrp) ? 0 : 1);
-    ' 2> /dev/null
+    # Compare the terminal's foreground process group (tpgid) with our own.
+    # If ps cannot answer, assume foreground: a wrong "yes" only risks SIGTTIN,
+    # while a wrong "no" would suppress an interactive prompt.
+    local tty_pgrp="" my_pgrp=""
+    tty_pgrp=$(ps -o tpgid= -p "$$" 2> /dev/null | tr -d '[:space:]') || return 0
+    my_pgrp=$(ps -o pgrp= -p "$$" 2> /dev/null | tr -d '[:space:]') || return 0
+    [[ -n "$tty_pgrp" && "$tty_pgrp" =~ ^[0-9]+$ && "$tty_pgrp" == "$my_pgrp" ]]
 }
 
 # Run command with timeout
-# Uses gtimeout/timeout if available, falls back to shell-based implementation
+# Uses GNU timeout if available, falls back to shell-based implementation
 #
 # Args:
 #   $1 - duration in seconds (0 or invalid = no timeout)
 #   $@ - command and arguments to execute
 #
 # Returns:
-#   Command exit code, or 124 if timed out (matches gtimeout behavior)
+#   Command exit code, or 124 if timed out (matches timeout behavior)
 #
 # Environment:
 #   MO_DEBUG - Set to 1 to enable debug logging to stderr
 #
 # Implementation notes:
-#   - Prefers gtimeout (coreutils) or timeout for reliability
+#   - Prefers GNU timeout for reliability
 #   - Shell fallback uses SIGTERM → SIGKILL escalation
 #   - Attempts process group cleanup to handle child processes
 #   - Returns exit code 124 on timeout (standard timeout exit code)
@@ -144,25 +109,22 @@ run_with_timeout() {
 
     # No timeout if duration is invalid or zero. The regex already forbids a
     # leading sign, so "<= 0" reduces to "is zero"; match that in pure bash
-    # rather than shelling out to bc, which is not guaranteed on macOS.
+    # rather than shelling out to an arithmetic helper.
     if [[ ! "$duration" =~ ^[0-9]+(\.[0-9]+)?$ ]] || [[ "$duration" =~ ^0+(\.0+)?$ ]]; then
         "$@"
         return $?
     fi
 
-    # Use timeout command if available (preferred path)
+    # Use GNU timeout when available (preferred path).
     #
-    # This backend has no owner-death detection, unlike the perl fallback below,
-    # and that asymmetry is deliberate. Measured on macOS with coreutils
-    # gtimeout: SIGKILLing the calling worker leaves gtimeout and its child
-    # alive, but both still die when gtimeout's own deadline fires, so the orphan
-    # window is capped by the caller's timeout budget (2-30s here) rather than
-    # unbounded. Ctrl-C already reaches them, since the signal goes to the whole
-    # foreground process group. Closing the remaining SIGKILL gap would mean
-    # either routing every non-TTY run through perl, which is every CI run and
-    # every piped run, or backgrounding the backend and polling it, which
-    # reopens the terminal-handoff class behind #1222/#1218. Neither is worth a
-    # window the deadline already bounds.
+    # This backend has no owner-death detection, and that asymmetry is
+    # deliberate. SIGKILLing the calling worker leaves timeout and its child
+    # alive, but both still die when timeout's own deadline fires, so the
+    # orphan window is capped by the caller's timeout budget (2-30s here)
+    # rather than unbounded. Ctrl-C already reaches them, since the signal
+    # goes to the whole foreground process group. Backgrounding the backend
+    # and polling it would reopen the terminal-handoff class behind
+    # #1222/#1218; not worth a window the deadline already bounds.
     if [[ -n "${MO_TIMEOUT_BIN:-}" ]]; then
         local timeout_bin="$MO_TIMEOUT_BIN"
         if [[ "$timeout_bin" != */* ]]; then
@@ -180,141 +142,6 @@ run_with_timeout() {
         return $?
     fi
 
-    # Use perl helper when timeout command is unavailable.
-    if [[ -n "${MO_TIMEOUT_PERL_BIN:-}" ]]; then
-        if [[ "${MO_DEBUG:-0}" == "1" ]]; then
-            echo "[TIMEOUT] Perl fallback, ${duration}s: $*" >&2
-        fi
-        # shellcheck disable=SC2016  # Embedded Perl uses Perl variables inside single quotes.
-        "$MO_TIMEOUT_PERL_BIN" -e '
-            use strict;
-            use warnings;
-            use POSIX qw(:sys_wait_h setpgid tcgetpgrp tcsetpgrp);
-            use Time::HiRes qw(time sleep);
-
-            my $duration = 0 + shift @ARGV;
-            $duration = 1 if $duration <= 0;
-            my $caller_pid = getppid();
-
-            # Only the process group that currently owns the terminal may hand it
-            # to a child. Mole runs these helpers concurrently inside one process
-            # group (parallel scan workers), so a helper that started while a
-            # sibling held the terminal would capture the sibling child as the
-            # "original" owner and later restore the terminal to that already
-            # dead process group. Mole then no longer owns the terminal and the
-            # next prompt read stops on SIGTTIN (issue #1222/#1218).
-            my $my_pgrp = getpgrp();
-            my $tty_fd = -t STDIN ? fileno(STDIN) : undef;
-            my $original_pgrp;
-            if (defined $tty_fd) {
-                $original_pgrp = tcgetpgrp($tty_fd);
-                undef $original_pgrp
-                    if !defined $original_pgrp
-                    || $original_pgrp < 0
-                    || $original_pgrp != $my_pgrp;
-            }
-
-            my $pid = fork();
-            defined $pid or exit 125;
-
-            if ($pid == 0) {
-                # New process group, NOT a new session: keep the controlling
-                # terminal so nested sudo inside the wrapped command can reuse
-                # the cached credential. setsid() would detach the tty and break
-                # brew cask uninstall scripts that call sudo (issue #1003).
-                # setpgid returns 0 on success (falsy in Perl), so it must not be
-                # guarded with `or exit`; a rare failure only degrades group-kill.
-                setpgid(0, 0);
-                exec @ARGV;
-                exit 127;
-            }
-
-            # Perl defers these handlers until a safe point. Record the desired
-            # exit status here and let the normal wait loop terminate and reap
-            # the whole timed process group.
-            my $shutdown_status = 0;
-            $SIG{INT} = sub { $shutdown_status ||= 130; };
-            $SIG{TERM} = sub { $shutdown_status ||= 143; };
-            $SIG{HUP} = sub { $shutdown_status ||= 129; };
-
-            # The child is a separate process group so timeout cleanup can kill
-            # its descendants. A tty only permits its foreground process group
-            # to read, however, so hand the terminal to the child while it runs.
-            # Without this, nested sudo prints Password: and then stops on
-            # SIGTTIN until the timeout expires (issue #1201).
-            setpgid($pid, $pid);
-            my $tty_handed_off = 0;
-            if (defined $tty_fd && defined $original_pgrp) {
-                local $SIG{TTOU} = "IGNORE";
-                $tty_handed_off = tcsetpgrp($tty_fd, $pid) == 0 ? 1 : 0;
-                kill "CONT", -$pid if $tty_handed_off;
-            }
-
-            my $restore_tty = sub {
-                return unless $tty_handed_off && defined $tty_fd && defined $original_pgrp;
-                $tty_handed_off = 0;
-                # Give the terminal back only while our own child still owns it.
-                # If something else took over meanwhile, restoring would revoke
-                # the current owner instead.
-                my $owner = tcgetpgrp($tty_fd);
-                return unless defined $owner && $owner == $pid;
-                local $SIG{TTOU} = "IGNORE";
-                tcsetpgrp($tty_fd, $original_pgrp);
-            };
-
-            my $terminate_child = sub {
-                my $sent = kill "TERM", -$pid;
-                kill "TERM", $pid unless $sent;
-
-                my $grace_deadline = time() + 2;
-                while (time() < $grace_deadline) {
-                    my $result = waitpid($pid, WNOHANG);
-                    return if $result == $pid || $result == -1;
-                    sleep 0.1;
-                }
-
-                $sent = kill "KILL", -$pid;
-                kill "KILL", $pid unless $sent;
-                waitpid($pid, 0);
-            };
-
-            my $deadline = time() + $duration;
-
-            while (1) {
-                my $result = waitpid($pid, WNOHANG);
-                if ($result == $pid) {
-                    my $status = $?;
-                    $restore_tty->();
-                    if (WIFEXITED($status)) {
-                        exit WEXITSTATUS($status);
-                    }
-                    if (WIFSIGNALED($status)) {
-                        exit 128 + WTERMSIG($status);
-                    }
-                    exit 1;
-                }
-
-                # A background shell worker can be killed without forwarding
-                # TERM to this Perl child. Detect reparenting so the timed
-                # command never outlives the worker that owned its deadline.
-                if ($shutdown_status || getppid() != $caller_pid) {
-                    my $status = $shutdown_status || 143;
-                    $terminate_child->();
-                    $restore_tty->();
-                    exit $status;
-                }
-
-                if (time() >= $deadline) {
-                    $terminate_child->();
-                    $restore_tty->();
-                    exit 124;
-                }
-
-                sleep 0.1;
-            }
-        ' "$duration" "$@"
-        return $?
-    fi
 
     # ========================================================================
     # Shell-based fallback implementation

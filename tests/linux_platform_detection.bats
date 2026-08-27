@@ -47,14 +47,13 @@ source "$PROJECT_ROOT/lib/platform/platform.sh"
 	[[ "$output" == *"mole: unsupported platform"* ]] || { echo "$output"; return 1; }
 }
 
-@test "platform detects darwin via uname and keeps the legacy macOS state dir" {
+@test "platform refuses a Darwin kernel with a clear message" {
 	run env PROJECT_ROOT="$PROJECT_ROOT" FIXTURE_ROOT="$FIXTURE_ROOT" PATH="$FIXTURE_ROOT/uname-darwin:$PATH" /bin/bash --noprofile --norc -c '
 set -euo pipefail
 source "$PROJECT_ROOT/lib/platform/platform.sh"
-printf "%s|%s\n" "$MOLE_PLATFORM" "$(mole_state_dir)"
 '
-	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
-	[[ "$output" == "darwin|$HOME/Library/Logs/mole" ]] || { echo "$output"; return 1; }
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"mole: unsupported platform"* ]] || { echo "$output"; return 1; }
 }
 
 @test "distro detection selects the module matching os-release ID" {
@@ -159,15 +158,3 @@ EOF
 	[[ "$output" == OK* ]] || { echo "$output"; return 1; }
 }
 
-@test "log paths stay under ~/Library/Logs/mole on darwin (byte-equivalent to legacy)" {
-	run env PROJECT_ROOT="$PROJECT_ROOT" FIXTURE_ROOT="$FIXTURE_ROOT" PATH="$FIXTURE_ROOT/uname-darwin:$PATH" /bin/bash --noprofile --norc -c '
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/base.sh"
-source "$PROJECT_ROOT/lib/core/log.sh"
-printf "%s|%s|%s\n" "$LOG_FILE" "$DEBUG_LOG_FILE" "$OPERATIONS_LOG_FILE"
-'
-
-	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
-	local expected="$HOME/Library/Logs/mole"
-	[[ "$output" == "$expected/mole.log|$expected/mole_debug_session.log|$expected/operations.log" ]] || { echo "$output"; return 1; }
-}

@@ -436,12 +436,6 @@ is_protected_purge_artifact() {
             is_protected_vendor_dir "$path"
             return $?
             ;;
-        DerivedData)
-            # Protect Xcode global DerivedData in ~/Library/Developer/Xcode/
-            # Only allow purging DerivedData within project directories
-            [[ "$path" == *"/Library/Developer/Xcode/DerivedData"* ]] && return 0
-            return 1
-            ;;
     esac
 
     return 1
@@ -1287,13 +1281,11 @@ confirm_purge_cleanup() {
     local item_count="${1:-0}"
     local total_size_kb="${2:-0}"
     local unknown_count="${3:-0}"
-    local cloud_count="${4:-0}"
-    local -a selected_paths=("${@:5}")
+    local -a selected_paths=("${@:4}")
 
     [[ "$item_count" =~ ^[0-9]+$ ]] || item_count=0
     [[ "$total_size_kb" =~ ^[0-9]+$ ]] || total_size_kb=0
     [[ "$unknown_count" =~ ^[0-9]+$ ]] || unknown_count=0
-    [[ "$cloud_count" =~ ^[0-9]+$ ]] || cloud_count=0
 
     local item_text="artifact"
     [[ $item_count -ne 1 ]] && item_text="artifacts"
@@ -1315,12 +1307,6 @@ confirm_purge_cleanup() {
         for selected_path in "${selected_paths[@]}"; do
             echo "  $selected_path"
         done
-    fi
-
-    if [[ $cloud_count -gt 0 ]]; then
-        echo ""
-        echo -e "${YELLOW}${ICON_WARNING}${NC} Cloud-synced artifacts may also be removed from other devices."
-        echo -e "${GRAY}Use 'mo purge --paths' to exclude cloud storage roots.${NC}"
     fi
 
     echo -ne "${PURPLE}${ICON_ARROW}${NC} Remove ${item_count} ${item_text}, ${size_display}${unknown_hint}  ${GREEN}Enter${NC} confirm, ${GRAY}ESC${NC} cancel: "
@@ -1683,7 +1669,6 @@ clean_project_artifacts() {
     local -a item_size_unknown_flags=()
     local -a item_recent_flags=()
     local -a item_age_labels=()
-    local -a item_cloud_flags=()
     local -a item_expected_parents=()
     local -a item_expected_parent_ids=()
     local -a item_expected_target_ids=()
@@ -1726,10 +1711,6 @@ clean_project_artifacts() {
         local available_width
         local path_prefix=""
 
-        if [[ "$project_path" == "[cloud] "* ]]; then
-            path_prefix="[cloud] "
-            project_path="${project_path#"[cloud] "}"
-        fi
 
         if [[ -n "$max_path_width" ]]; then
             available_width="$max_path_width"
@@ -1839,17 +1820,9 @@ clean_project_artifacts() {
 
         local is_recent="${safe_recent_flags[$item_index]:-true}"
         local activity_state="${safe_activity_states[$item_index]:-uncertain}"
-        local is_cloud=false
-        if mole_purge_is_cloud_synced_path "$item"; then
-            is_cloud=true
-        fi
         local display_project_path="$project_path"
         local display_item_path
         display_item_path=$(format_purge_target_path "$item")
-        if [[ "$is_cloud" == "true" ]]; then
-            display_project_path="[cloud] $display_project_path"
-            display_item_path="[cloud] $display_item_path"
-        fi
         raw_project_paths+=("$display_project_path")
         raw_artifact_types+=("$artifact_type")
         item_paths+=("$item")
@@ -1859,7 +1832,6 @@ clean_project_artifacts() {
         item_sizes+=("$size_kb")
         item_size_unknown_flags+=("$size_unknown")
         item_recent_flags+=("$is_recent")
-        item_cloud_flags+=("$is_cloud")
         item_expected_parents+=("${safe_expected_parents[$item_index]}")
         item_expected_parent_ids+=("${safe_expected_parent_ids[$item_index]}")
         item_expected_target_ids+=("${safe_expected_target_ids[$item_index]}")
@@ -2009,7 +1981,6 @@ clean_project_artifacts() {
         local -a sorted_item_project_identities=()
         local -a sorted_item_project_paths=()
         local -a sorted_item_age_labels=()
-        local -a sorted_item_cloud_flags=()
         local -a sorted_item_expected_parents=()
         local -a sorted_item_expected_parent_ids=()
         local -a sorted_item_expected_target_ids=()
@@ -2024,7 +1995,6 @@ clean_project_artifacts() {
             sorted_item_project_identities+=("${item_project_identities[idx]}")
             sorted_item_project_paths+=("${item_project_paths[idx]}")
             sorted_item_age_labels+=("${item_age_labels[idx]}")
-            sorted_item_cloud_flags+=("${item_cloud_flags[idx]}")
             sorted_item_expected_parents+=("${item_expected_parents[idx]}")
             sorted_item_expected_parent_ids+=("${item_expected_parent_ids[idx]}")
             sorted_item_expected_target_ids+=("${item_expected_target_ids[idx]}")
@@ -2040,7 +2010,6 @@ clean_project_artifacts() {
         item_project_identities=("${sorted_item_project_identities[@]}")
         item_project_paths=("${sorted_item_project_paths[@]}")
         item_age_labels=("${sorted_item_age_labels[@]}")
-        item_cloud_flags=("${sorted_item_cloud_flags[@]}")
         item_expected_parents=("${sorted_item_expected_parents[@]}")
         item_expected_parent_ids=("${sorted_item_expected_parent_ids[@]}")
         item_expected_target_ids=("${sorted_item_expected_target_ids[@]}")
@@ -2088,23 +2057,12 @@ clean_project_artifacts() {
         fi
     else
         # Non-interactive: select all non-recent items
-        local skipped_cloud_count=0
         for ((i = 0; i < ${#menu_options[@]}; i++)); do
-            if [[ "${item_cloud_flags[i]:-false}" == "true" && "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                skipped_cloud_count=$((skipped_cloud_count + 1))
-                continue
-            fi
             if [[ ${item_recent_flags[i]} != "true" ]]; then
                 [[ -n "$PURGE_SELECTION_RESULT" ]] && PURGE_SELECTION_RESULT+=","
                 PURGE_SELECTION_RESULT+="$i"
             fi
         done
-        if [[ $skipped_cloud_count -gt 0 ]]; then
-            local skipped_cloud_text="artifact"
-            [[ $skipped_cloud_count -ne 1 ]] && skipped_cloud_text="artifacts"
-            echo ""
-            echo -e "${YELLOW}${ICON_WARNING}${NC} Skipped ${skipped_cloud_count} cloud-synced ${skipped_cloud_text} in non-interactive mode (confirmation required)"
-        fi
     fi
     if [[ -z "$PURGE_SELECTION_RESULT" ]]; then
         echo ""
@@ -2121,7 +2079,6 @@ clean_project_artifacts() {
     IFS=',' read -r -a selected_indices <<< "$PURGE_SELECTION_RESULT"
     local selected_total_kb=0
     local selected_unknown_count=0
-    local selected_cloud_count=0
     local -a selected_display_paths=()
     for idx in "${selected_indices[@]}"; do
         local selected_size_kb="${item_sizes[idx]:-0}"
@@ -2130,14 +2087,11 @@ clean_project_artifacts() {
         if [[ "${item_size_unknown_flags[idx]:-false}" == "true" ]]; then
             selected_unknown_count=$((selected_unknown_count + 1))
         fi
-        if [[ "${item_cloud_flags[idx]:-false}" == "true" ]]; then
-            selected_cloud_count=$((selected_cloud_count + 1))
-        fi
         selected_display_paths+=("${item_display_paths[idx]}")
     done
 
     if [[ -t 0 ]]; then
-        if ! confirm_purge_cleanup "${#selected_indices[@]}" "$selected_total_kb" "$selected_unknown_count" "$selected_cloud_count" "${selected_display_paths[@]}"; then
+        if ! confirm_purge_cleanup "${#selected_indices[@]}" "$selected_total_kb" "$selected_unknown_count" "${selected_display_paths[@]}"; then
             echo -e "${GRAY}Purge cancelled${NC}"
             printf '\n'
             PURGE_CATEGORY_FULL_PATHS_ARRAY=()

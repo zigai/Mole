@@ -17,8 +17,8 @@ if [[ -z "${MOLE_BASE_LOADED:-}" ]]; then
     source "$_MOLE_CORE_DIR/base.sh"
 fi
 
-# Log roots resolve through the platform layer: ~/Library/Logs/mole on
-# darwin, ${XDG_STATE_HOME:-~/.local/state}/mole on linux. log.sh may be
+# Log roots resolve through the platform layer:
+# ${XDG_STATE_HOME:-~/.local/state}/mole. log.sh may be
 # sourced directly (bin scripts, tests), so load the platform module when
 # common.sh has not already provided it.
 if [[ -z "${MOLE_PLATFORM_LOADED:-}" ]]; then
@@ -219,7 +219,7 @@ oplog_enabled() {
 # Usage: log_operation <command> <action> <path> [detail]
 # Example: log_operation "clean" "REMOVED" "/path/to/file" "15.2MB"
 # Example: log_operation "clean" "SKIPPED" "/path/to/file" "whitelist"
-# Example: log_operation "uninstall" "REMOVED" "/Applications/App.app" "150MB"
+# Example: log_operation "uninstall" "REMOVED" "/path/to/App" "150MB"
 log_operation() {
     # Allow disabling via environment variable
     oplog_enabled || return 0
@@ -380,9 +380,6 @@ log_system_info() {
         echo "Hostname: $(hostname)"
         echo "Architecture: $(uname -m)"
         echo "Kernel: $(uname -r)"
-        if command -v sw_vers > /dev/null; then
-            echo "macOS: $(sw_vers -productVersion), $(sw_vers -buildVersion)"
-        fi
         echo "Shell: ${SHELL:-unknown}, ${TERM:-unknown}"
 
         # Check sudo status non-interactively (skip in test mode)

@@ -149,7 +149,7 @@ EOF
     [ "$status" -eq 1 ]
 }
 
-@test "load_whitelist merges FINDER_METADATA into an existing custom file (#1396)" {
+@test "load_whitelist merges XDG hard-safety roots into an existing custom file" {
     mkdir -p "$(dirname "$WHITELIST_PATH")"
     printf '%s\n' "$HOME/.cache/custom-keep/*" > "$WHITELIST_PATH"
 
@@ -160,9 +160,7 @@ load_whitelist
 has_protected=false
 has_custom=false
 for p in "${CURRENT_WHITELIST_PATTERNS[@]}"; do
-    # darwin merges the Finder-metadata sentinel; linux merges its XDG
-    # hard-safety roots instead.
-    [[ "$p" == "$FINDER_METADATA_SENTINEL" ]] && has_protected=true
+    # Linux merges its XDG hard-safety roots instead of a Finder sentinel.
     case "$p" in */mole*) has_protected=true ;; esac
     [[ "$p" == "$HOME/.cache/custom-keep/*" ]] && has_custom=true
 done
@@ -178,15 +176,13 @@ EOF
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
-declare -a WHITELIST_PATTERNS=("$HOME/.cache/custom-keep/*" "$FINDER_METADATA_SENTINEL")
+declare -a WHITELIST_PATTERNS=("$HOME/.cache/custom-keep/*")
 SEEDED_PATTERNS=("${WHITELIST_PATTERNS[@]}")
 declare -a CURRENT_WHITELIST_PATTERNS=("${WHITELIST_PATTERNS[@]}")
 ensure_safety_whitelist_patterns
 ensure_safety_whitelist_patterns
-sentinel_count=0
 custom_count=0
 for p in "${WHITELIST_PATTERNS[@]}"; do
-    [[ "$p" == "$FINDER_METADATA_SENTINEL" ]] && sentinel_count=$((sentinel_count + 1))
     [[ "$p" == "$HOME/.cache/custom-keep/*" ]] && custom_count=$((custom_count + 1))
 done
 # Every safety entry must appear exactly once after two calls, and the total
@@ -201,8 +197,7 @@ for safety in "${SAFETY_WHITELIST_PATTERNS[@]}"; do
     [[ $seen -eq 1 ]] || duplicated=$((duplicated + 1))
 done
 # Seeded entries already covered by hard safety merge once instead of
-# duplicating, so the expected total is safety plus uncovered seeds. On
-# darwin the sentinel is a safety entry; on linux it stays a custom seed.
+# duplicating, so the expected total is safety plus uncovered seeds.
 expected_total=${#SAFETY_WHITELIST_PATTERNS[@]}
 for seeded in "${SEEDED_PATTERNS[@]}"; do
     covered=false
@@ -211,13 +206,12 @@ for seeded in "${SEEDED_PATTERNS[@]}"; do
     done
     [[ "$covered" == true ]] || expected_total=$((expected_total + 1))
 done
-printf 'sentinel=%s custom=%s duplicated=%s total_matches_expected=%s\n' \
-    "$sentinel_count" "$custom_count" "$duplicated" \
+printf 'custom=%s duplicated=%s total_matches_expected=%s\n' \
+    "$custom_count" "$duplicated" \
     "$([[ ${#WHITELIST_PATTERNS[@]} -eq $expected_total ]] && echo yes || echo no)"
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [[ "$output" == *"sentinel=1"* ]] || { echo "$output"; return 1; }
     [[ "$output" == *"custom=1"* ]] || { echo "$output"; return 1; }
     [[ "$output" == *"duplicated=0"* ]] || { echo "$output"; return 1; }
     [[ "$output" == *"total_matches_expected=yes"* ]] || { echo "$output"; return 1; }
@@ -242,36 +236,6 @@ EOF
     [[ -f "$optimize_path" ]] || return 1
     run grep -qFx 'dock_refresh' "$optimize_path"
     [ "$status" -eq 1 ]
-}
-
-@test "whitelist inventory exposes LM Studio app cache" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow"
-    fi
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/manage/whitelist.sh"
-get_all_cache_items
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"LM Studio app cache|\$HOME/Library/Caches/com.lmstudio.lmstudio/*|ai_ml_cache"* ]] || return 1
-    [[ "$output" != *".cache/lm-studio"* ]]
-}
-
-@test "whitelist inventory exposes Codex staging and Tart caches" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow"
-    fi
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/manage/whitelist.sh"
-get_all_cache_items
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Codex Desktop update staging|\$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation|ai_ml_cache"* ]] || return 1
-    [[ "$output" == *"Tart OCI/IPSW cache|\$HOME/.tart/cache|container_cache"* ]] || return 1
 }
 
 @test "whitelist inventory offers no protection for paths Mole never deletes" {
@@ -320,24 +284,6 @@ EOF
     [[ "$output" == *"Go build cache|$build_root/*|compiler_cache"* ]] || return 1
     [[ "$output" == *"Go module cache|$module_root/*|compiler_cache"* ]] || return 1
     [[ "$output" != *"\$HOME/go/pkg/mod"* ]]
-}
-
-@test "whitelist inventory exposes guarded PyInstaller and Clang caches" {
-    local darwin_cache="$HOME/darwin-cache"
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow"
-    fi
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DARWIN_CACHE="$darwin_cache" \
-        /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/manage/whitelist.sh"
-mole_darwin_user_cache_root() { printf '%s\n' "$DARWIN_CACHE"; }
-get_all_cache_items
-EOF
-
-    [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"PyInstaller binary cache|\$HOME/Library/Application Support/pyinstaller/bincache*|compiler_cache"* ]] || return 1
-    [[ "$output" == *"Clang module cache|$darwin_cache/clang/*|compiler_cache"* ]]
 }
 
 @test "whitelist inventory resolves the GitHub CLI cache location" {
@@ -397,22 +343,6 @@ EOF
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     [[ "$output" == *"GitHub CLI cache · skipped (whitelist)"* ]] || return 1
     [ ! -e "$trace" ] || return 1
-}
-
-@test "whitelist inventory exposes Chrome AI model stores" {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        skip "macOS-only flow"
-    fi
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/manage/whitelist.sh"
-get_all_cache_items
-EOF
-
-    [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"Chrome on-device AI models|\$HOME/Library/Application Support/Google/Chrome/OptGuideOnDevice*/*|ai_ml_cache"* ]] || return 1
-    [[ "$output" == *"Chrome optimization guide models|\$HOME/Library/Application Support/Google/Chrome/optimization_guide_model_store/*|ai_ml_cache"* ]] || return 1
-    [[ "$output" == *"Chrome browser cache|\$HOME/Library/Caches/Google/Chrome/*|browser_cache"* ]] || return 1
 }
 
 @test "mo clean --whitelist persists selections" {
@@ -491,14 +421,7 @@ EOF
         source '$PROJECT_ROOT/lib/manage/whitelist.sh'
         rm -f \"\$HOME/.config/mole/whitelist\"
         load_whitelist
-        # tldr pages live under ~/Library/Caches on darwin and ~/.cache on
-        # linux; assert the parent of whichever default pattern applies.
-        if [[ \"\${MOLE_PLATFORM:-}\" == \"linux\" ]]; then
-            tealdeer_parent=\"\$HOME/.cache/tealdeer\"
-        else
-            tealdeer_parent=\"\$HOME/Library/Caches/tealdeer\"
-        fi
-        is_path_whitelisted \"\$tealdeer_parent\"
+        is_path_whitelisted \"\$HOME/.cache/tealdeer\"
     "; then
         status=0
     else

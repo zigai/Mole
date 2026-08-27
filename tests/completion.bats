@@ -76,9 +76,6 @@ setup() {
 	[[ "$output" == *"status"* ]] || return 1
 	[[ "$output" == *"history"* ]] || return 1
 	[[ "$output" == *"purge"* ]] || return 1
-	if [[ "$(uname -s)" == "Darwin" ]]; then
-		[[ "$output" == *"touchid"* ]] || return 1
-	fi
 	[[ "$output" == *"completion"* ]]
 }
 

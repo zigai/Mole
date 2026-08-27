@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # update.sh fork endpoint assertions: no tw93 endpoint may be reachable from
-# any linux (or darwin) code path, and channel logic stays script-only on linux.
+# any code path, and channel logic stays script-only on linux.
 
 setup_file() {
     PROJECT_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
